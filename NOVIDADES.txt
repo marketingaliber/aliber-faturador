@@ -1,3 +1,2 @@
-- Campos de data agora preenchidos pelo calendário/relógio do PDV+ (modo digitação)
-- Ícone da Aliber
-- Atualização automática
+- Corrigido: a data e a hora entravam misturadas com o valor anterior do campo
+- Não precisa refazer a calibração

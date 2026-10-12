@@ -27,7 +27,7 @@ import atualizador
 import faturador_core as fc
 
 APP_NOME = "Aliber Faturador"
-VERSAO = "1.1"
+VERSAO = "1.2"
 VERMELHO = "#D7262B"
 AZUL = "#1B4FA0"
 
@@ -45,7 +45,6 @@ PONTOS = [
     ("campo_final", "Campo de data FINAL", False, False),
     ("campo_inicial", "Campo de data INICIAL. Depois do F8, CLIQUE nele (abre o calendário)", False, False),
     ("data_lapis", "No calendário: o LÁPIS (canto inferior esquerdo). Depois do F8, clique nele", False, True),
-    ("data_texto", "O campo onde se digita a data", False, False),
     ("data_ok", "O botão OK do calendário. Depois do F8, clique nele (abre o relógio)", False, False),
     ("hora_teclado", "No relógio: o ícone de TECLADO (canto inferior esquerdo). Depois do F8, clique nele", False, True),
     ("hora_h", "O campo da HORA", False, False),
@@ -170,11 +169,12 @@ class Tela:
         self.pg.click(*xy)
         self.esperar(self.cfg["espera_clique"])
 
-    def digitar(self, texto):
+    def digitar(self, texto, apagar=14):
+        """Limpa o campo sem depender do Ctrl+A (o PDV+ ignora): End + vários Backspace, depois digita."""
         self.checar_parada()
-        self.pg.hotkey("ctrl", "a")
-        time.sleep(0.15)
-        self.pg.press("backspace")
+        self.pg.press("end")
+        time.sleep(0.1)
+        self.pg.press("backspace", presses=apagar, interval=0.03)
         time.sleep(0.15)
         digitar_unicode(texto)
         time.sleep(0.3)
@@ -241,8 +241,7 @@ def preencher_data(tela, campo, dt):
         raise Parado("O calendário não abriu ao clicar no campo de data (ou já abriu no modo digitação).")
     tela.clicar("data_lapis")
     tela.esperar(0.6)
-    tela.clicar("data_texto")
-    tela.digitar(dt.strftime("%d/%m/%Y"))
+    tela.digitar(dt.strftime("%d/%m/%Y"))  # o campo já abre com o cursor nele
     tela.clicar("data_ok")
     tela.esperar(1.0)
     if not tela.confere("hora_teclado"):
@@ -250,9 +249,9 @@ def preencher_data(tela, campo, dt):
     tela.clicar("hora_teclado")
     tela.esperar(0.6)
     tela.clicar("hora_h")
-    tela.digitar(f"{dt.hour:02d}")
+    tela.digitar(f"{dt.hour:02d}", apagar=4)
     tela.clicar("hora_m")
-    tela.digitar(f"{dt.minute:02d}")
+    tela.digitar(f"{dt.minute:02d}", apagar=4)
     tela.clicar("hora_ok")
     tela.esperar(1.0)
     if not tela.confere("filtrar"):  # com janela aberta por cima, o botão Filtrar fica escurecido

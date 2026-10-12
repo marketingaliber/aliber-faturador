@@ -1,4 +1,4 @@
-ALIBER FATURADOR 1.1
+ALIBER FATURADOR 1.2
 Emite NFC-e, depois da venda, das vendas de cartão e Pix que ficaram sem nota no PDV+.
 
 O QUE ELE FATURA
