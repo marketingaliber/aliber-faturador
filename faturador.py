@@ -28,7 +28,7 @@ import faturador_core as fc
 import ocr
 
 APP_NOME = "Aliber Faturador"
-VERSAO = "2.0"
+VERSAO = "2.1"
 VERMELHO = "#D7262B"
 AZUL = "#1B4FA0"
 
@@ -187,8 +187,13 @@ class Tela:
 
     # leitura de tela
     def regiao_lista(self):
+        """Da borda esquerda da janela até o canto direito calibrado, com folga acima do canto
+        superior: assim nenhum número fica cortado, mesmo se o canto foi marcado sobre o texto."""
         a, b = self.ponto("lista_sup"), self.ponto("lista_inf")
-        return (int(a[0]), int(a[1]), int(b[0] - a[0]), int(b[1] - a[1]))
+        ox, oy = self.origem()
+        x0 = max(0, ox) + 2
+        y0 = max(max(0, oy) + 2, a[1] - 40)
+        return (int(x0), int(y0), int(b[0] - x0), int(b[1] - y0))
 
     def regiao_titulo(self):
         x, y = self.ponto("voltar")
@@ -304,6 +309,8 @@ def localizar(tela, cfg, num, log):
     try:
         os.makedirs(os.path.dirname(ARQ_FALHA), exist_ok=True)
         img.save(ARQ_FALHA)
+        with open(ARQ_FALHA.replace(".png", ".txt"), "w", encoding="utf-8") as f:
+            f.write(f"Procurando: {num}\n\n" + "\n".join(t for t, _ in linhas))
     except Exception:
         pass
     log(f"   não achei {num} na lista ({i + 1} tela(s) lida(s)); imagem salva em calibracao/")
@@ -460,7 +467,9 @@ class App:
         ttk.Button(filtro, text="Atualizar", command=self.atualizar).pack(side="right")
 
         cols = ("status", "numero", "data", "valor", "formas", "cliente", "motivo")
-        self.tree = ttk.Treeview(root, columns=cols, show="headings")
+        corpo = tk.Frame(root)
+        corpo.pack(fill="both", expand=True, padx=12)
+        self.tree = ttk.Treeview(corpo, columns=cols, show="headings")
         for c, t, w, a in [("status", "Situação", 170, "w"), ("numero", "Nº", 130, "w"),
                            ("data", "Aberta em", 110, "w"), ("valor", "Valor", 90, "e"),
                            ("formas", "Pagamento", 230, "w"), ("cliente", "Cliente", 150, "w"),
@@ -470,12 +479,10 @@ class App:
         self.tree.tag_configure("faturar", background="#e3f4e6")
         self.tree.tag_configure("manual", background="#fff3cd")
         self.tree.tag_configure("cinza", foreground="#888888")
-        sb = ttk.Scrollbar(root, orient="vertical", command=self.tree.yview)
+        sb = ttk.Scrollbar(corpo, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
-        corpo = tk.Frame(root)
-        corpo.pack(fill="both", expand=True, padx=12)
-        self.tree.pack(in_=corpo, side="left", fill="both", expand=True)
-        sb.pack(in_=corpo, side="right", fill="y")
+        sb.pack(side="right", fill="y")
+        self.tree.pack(side="left", fill="both", expand=True)
 
         rodape = tk.Frame(root)
         rodape.pack(fill="x", padx=12, pady=8)

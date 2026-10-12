@@ -1,4 +1,2 @@
-- Nova forma de achar as vendas: o programa LÊ o número na tela do PDV+ (sem calendário e relógio)
-- Vendas abertas no mesmo minuto agora são faturadas normalmente
-- Antes de emitir, confere o número da venda no título da tela
-- É preciso refazer a calibração (ficou mais curta)
+- Corrigido: números cortados na borda esquerda da lista (não precisa recalibrar)
+- Corrigido: a lista de vendas não aparecia na janela do Faturador
