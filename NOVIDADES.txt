@@ -1,0 +1,3 @@
+- Campos de data agora preenchidos pelo calendário/relógio do PDV+ (modo digitação)
+- Ícone da Aliber
+- Atualização automática
