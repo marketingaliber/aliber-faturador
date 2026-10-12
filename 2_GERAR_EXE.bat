@@ -9,7 +9,7 @@ for %%V in (3.13 3.12 3.11) do (
 if not defined PY set "PY=python"
 %PY% -m pip install --upgrade -q -r requirements.txt pyinstaller
 %PY% gerar_icone.py
-%PY% -m PyInstaller --noconfirm --onefile --windowed --name AliberFaturador --icon aliber.ico --add-data "aliber.ico;." faturador.py
+%PY% -m PyInstaller --noconfirm --onefile --windowed --name AliberFaturador --icon aliber.ico --add-data "aliber.ico;." --collect-all winrt faturador.py
 echo.
 echo Pronto: o programa esta em  dist\AliberFaturador.exe
 echo Copie so esse .exe para o computador do cliente (a calibracao e feita la).

@@ -26,7 +26,7 @@ FORMAS_FATURAR_PADRAO = [1, 3, 4]  # cartão de crédito, Pix, cartão de débit
 
 # Status da triagem
 FATURAR = "FATURAR"
-MANUAL = "MANUAL"          # elegível, mas outra venda sem nota no mesmo minuto
+MANUAL = "MANUAL"          # elegível, mas mais antiga que o maior filtro do PDV+ (1 ano)
 JA_FATURADA = "Já tem NFC-e"
 RECEBIMENTO = "Recebimento de crediário"
 NAO_FATURAR = "Não faturar"
@@ -52,19 +52,7 @@ def nome_formas(codigos):
     return " + ".join(FORMAS.get(c, f"Forma {c}") for c in codigos)
 
 
-def _collisions(con, venda_id, criado):
-    """
-    Outras vendas (com ou sem nota, de qualquer caixa) no intervalo que o filtro de
-    período vai mostrar. Se houver, a 1ª linha da lista pode não ser a venda certa.
-    """
-    ini = criado.replace(second=0, microsecond=0)
-    fim = ini + timedelta(minutes=2)
-    r = con.execute(
-        """select count(*) from venda
-           where id_venda <> ? and data_hora_criado >= ? and data_hora_criado < ?""",
-        (venda_id, ini.strftime("%Y-%m-%dT%H:%M:%S"), fim.strftime("%Y-%m-%dT%H:%M:%S")),
-    ).fetchone()[0]
-    return r
+DIAS_MAXIMOS = 360  # o maior período do filtro do PDV+ é 1A
 
 
 def triagem(db_path, data_ini, data_fim, formas_faturar=None):
@@ -114,7 +102,8 @@ def triagem(db_path, data_ini, data_fim, formas_faturar=None):
                 if p["forma_pagamento"] not in codigos:
                     codigos.append(p["forma_pagamento"])
             criado = _dt(v["data_hora_criado"])
-            num = f"{v['codigo_dispositivo']:03d}.{v['codigo_venda']}"
+            num_puro = f"{v['codigo_dispositivo']:03d}.{v['codigo_venda']}"
+            num = num_puro
             if v["mesa"] is not None:
                 num += f" ({'mesa' if v['eh_mesa'] else 'comanda'} {v['mesa']})"
 
@@ -132,17 +121,15 @@ def triagem(db_path, data_ini, data_fim, formas_faturar=None):
                 motivo = ("dinheiro" if codigos == [0] else
                           "crediário" if 2 in codigos else
                           "sem pagamento" if not codigos else nome_formas(codigos).lower())
+            elif (datetime.now() - criado).days > DIAS_MAXIMOS:
+                st, motivo = MANUAL, "venda com mais de 1 ano, fora dos filtros do PDV+"
             else:
-                outras = _collisions(con, v["id_venda"], criado)
-                if outras:
-                    st = MANUAL
-                    motivo = f"{outras} outra(s) venda(s) aberta(s) no mesmo minuto, emitir à mão"
-                else:
-                    st, motivo = FATURAR, ("pagamento misto" if len(codigos) > 1 else "")
+                st, motivo = FATURAR, ("pagamento misto" if len(codigos) > 1 else "")
 
             res.append({
                 "id_venda": v["id_venda"],
                 "numero": num,
+                "num": num_puro,
                 "criado": criado,
                 "valor": round(v["valor_total"] or 0, 2),
                 "formas": nome_formas(codigos) if codigos else "-",
@@ -157,7 +144,7 @@ def triagem(db_path, data_ini, data_fim, formas_faturar=None):
 
 
 def reavaliar(db_path, id_venda):
-    """Antes de cada emissão: a venda ainda está sem nota e isolada no minuto?"""
+    """Antes de cada emissão: a venda ainda está sem nota?"""
     con = conectar(db_path)
     try:
         v = con.execute(
@@ -167,8 +154,6 @@ def reavaliar(db_path, id_venda):
             return False, "venda excluída ou cancelada"
         if v["id_nota_fiscal"]:
             return False, "já tem NFC-e"
-        if _collisions(con, id_venda, _dt(v["data_hora_criado"])):
-            return False, "outra venda aberta no mesmo minuto, emitir à mão"
         return True, ""
     finally:
         con.close()

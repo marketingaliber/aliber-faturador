@@ -1,4 +1,4 @@
-ALIBER FATURADOR 1.2
+ALIBER FATURADOR 2.0
 Emite NFC-e, depois da venda, das vendas de cartão e Pix que ficaram sem nota no PDV+.
 
 O QUE ELE FATURA
@@ -6,7 +6,7 @@ O QUE ELE FATURA
 O QUE ELE NÃO FATURA
   - Dinheiro, crediário, vendas canceladas ou em aberto.
   - Recebimentos de crediário (pagamento de conta, mesmo que pago com Pix ou cartão).
-  - Vendas abertas no mesmo minuto que outra venda: aparecem em AMARELO, para emitir à mão.
+  - Vendas com mais de 1 ano (fora dos filtros do PDV+): aparecem em AMARELO, para emitir à mão.
 As formas de pagamento podem ser mudadas em Configurações.
 
 PRIMEIRA VEZ NO COMPUTADOR DO CLIENTE
@@ -14,23 +14,23 @@ PRIMEIRA VEZ NO COMPUTADOR DO CLIENTE
   2. No PDV+, maximizado: Caixa > menu (três linhas) > Buscar negociações. Deixe o painel Filtros aberto
      e escolha um período que mostre ao menos uma venda (ex.: 3M).
   3. No Faturador, clique em "Calibrar cliques" e siga a janelinha azul no canto da tela:
-     mouse em cima do item pedido + F8. Quando a janelinha disser "depois do F8, clique nele",
-     clique de verdade no PDV+ para abrir a próxima tela (calendário, relógio, venda...).
-     Nos itens opcionais, F9 pula. Na confirmação "Emitir NFC-e?" clique em CANCELAR.
-     No calendário e no relógio, depois de marcar o OK, pode confirmar com qualquer data/hora.
+     mouse em cima do item pedido + F8. Quando a janelinha pedir, clique de verdade no PDV+
+     para chegar à próxima tela (filtrar, abrir uma venda, Emitir NFC-e...). F9 pula os opcionais.
+     Na confirmação "Emitir NFC-e?" clique em CANCELAR.
   4. Volte o PDV+ para "Buscar negociações" e clique em "Testar (sem emitir)".
-     O macro faz todo o caminho com a venda mais antiga e CANCELA na confirmação.
-     Observe se a data foi digitada certo nos campos Inicial/Final e se a venda certa abriu.
+     O macro filtra, procura a venda pelo NÚMERO lendo a tela (rolando a lista se precisar),
+     abre, confere o número no título e CANCELA na confirmação.
 
 USO NORMAL
   - Escolha o período, confira a lista (verde = vai faturar) e clique em FATURAR PENDENTES.
   - Não mexa no mouse/teclado enquanto roda. ESC para parar (ou mouse no canto superior esquerdo).
-  - Cada nota é conferida no banco. Se a nota não sair, ou cair em outra venda, o macro PARA.
+  - Antes de emitir, o número da venda é conferido no título da tela. Depois de emitir, a nota é
+    conferida no banco. Qualquer diferença: o macro PARA.
   - Histórico de tudo que foi emitido: historico_faturamento.csv (abre no Excel).
 
 SE ALGO DER ERRADO NO TESTE
-  - Parou em "calendário não abriu" ou "relógio não fechou": refaça a calibração com calma,
-    com o mouse bem no centro de cada botão.
+  - "Não achei a venda na lista": a imagem do que o programa viu fica em
+    calibracao\ultima_busca_sem_sucesso.png. Confira se os cantos da lista foram calibrados certo.
   - O computador é lento: aumente os tempos em Configurações.
   - Mudou a resolução da tela ou atualizou o PDV+: refaça a calibração.
 

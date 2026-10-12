@@ -1,2 +1,4 @@
-- Corrigido: a data e a hora entravam misturadas com o valor anterior do campo
-- Não precisa refazer a calibração
+- Nova forma de achar as vendas: o programa LÊ o número na tela do PDV+ (sem calendário e relógio)
+- Vendas abertas no mesmo minuto agora são faturadas normalmente
+- Antes de emitir, confere o número da venda no título da tela
+- É preciso refazer a calibração (ficou mais curta)
