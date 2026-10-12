@@ -10,5 +10,5 @@ Instruções de uso: veja `LEIA-ME.txt`.
 
 ## Publicar uma versão nova
 1. Altere `VERSAO` em `faturador.py` e descreva as mudanças em `NOVIDADES.txt`.
-2. Crie a tag `vX.Y` com o mesmo número. O GitHub compila o .exe e publica a versão;
+2. Envie para o ramo `main`. O GitHub compila o .exe e publica a versão `vX.Y` sozinho;
    os programas instalados se atualizam ao abrir.
