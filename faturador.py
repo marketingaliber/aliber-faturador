@@ -656,12 +656,13 @@ class ResumoFinal:
 
         if puladas:
             secao("Vendas puladas")
-            for v, motivo in puladas[:5]:
+            maximo = 5 if w.winfo_screenheight() >= 900 else 2
+            for v, motivo in puladas[:maximo]:
                 tk.Label(corpo, text=f"Nº {v['numero']}  •  {brl(v['valor'])}  •  {motivo}", bg="white",
                          font=("Segoe UI", 9), fg="#7A3E00").grid(row=linha, column=0, columnspan=3, sticky="w", padx=(10, 0))
                 linha += 1
-            if len(puladas) > 5:
-                tk.Label(corpo, text=f"... e mais {len(puladas) - 5} (veja o histórico)", bg="white",
+            if len(puladas) > maximo:
+                tk.Label(corpo, text=f"... e mais {len(puladas) - maximo} (veja o histórico)", bg="white",
                          font=("Segoe UI", 9)).grid(row=linha, column=0, columnspan=3, sticky="w", padx=(10, 0))
                 linha += 1
         corpo.grid_columnconfigure(0, weight=1)
