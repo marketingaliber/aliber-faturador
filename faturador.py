@@ -421,7 +421,7 @@ def rodar_macro(cfg, vendas, teste, fila):
     st = None
     try:
         for i, v in enumerate(vendas, 1):
-            fila.put(("progresso", f"Venda {i} de {len(vendas)}  •  Nº {v['numero']}  •  R$ {v['valor']:.2f}"))
+            fila.put(("progresso", f"{i} de {len(vendas)}  •  Nº {v['num']}  •  {brl(v['valor'])}"))
             log(f"[{i}/{len(vendas)}] {v['numero']}  R$ {v['valor']:.2f}  {v['formas']}")
             st, msg = emitir_uma(tela, cfg, v, teste, log)
             log(f"   -> {st}: {msg}")
@@ -497,11 +497,11 @@ class AvisoExecucao:
         self.cor = VERMELHO
         self.frame = tk.Frame(self.win, bg=self.cor)
         self.frame.pack(fill="both", expand=True)
-        tam = 13 if sw >= 1600 else 11
+        tam = 13 if sw >= 1600 else 11 if sw >= 1300 else 10
         self.lbl = tk.Label(self.frame, text=self.TEXTO, fg="white", bg=self.cor,
                             font=("Segoe UI", tam, "bold"))
         self.lbl.pack(side="left", padx=14)
-        self.prog = tk.Label(self.frame, text="Preparando...   (ESC para parar)", fg="white", bg=self.cor,
+        self.prog = tk.Label(self.frame, text="Preparando...  •  ESC para parar", fg="white", bg=self.cor,
                              font=("Segoe UI", tam - 2))
         self.prog.pack(side="right", padx=14)
         self.win.update_idletasks()
@@ -544,7 +544,7 @@ class AvisoExecucao:
 
     def progresso(self, texto):
         if self.win.winfo_exists():
-            self.prog.configure(text=texto + "   (ESC para parar)")
+            self.prog.configure(text=texto + "  •  ESC para parar")
 
     def fechar(self):
         if self.win.winfo_exists():
@@ -587,8 +587,10 @@ class ResumoFinal:
         w.configure(bg="white")
         w.transient(app.root)
         w.attributes("-topmost", True)
-        w.geometry("680x600")
-        w.minsize(560, 480)
+        sw, sh = w.winfo_screenwidth(), w.winfo_screenheight()
+        larg, alt = 680, min(600, sh - 90)
+        w.geometry(f"{larg}x{alt}+{max(0, (sw - larg) // 2)}+{max(0, (sh - alt) // 2 - 20)}")
+        w.minsize(560, 420)
 
         topo = tk.Frame(w, bg=cor)
         topo.pack(fill="x")
@@ -598,8 +600,15 @@ class ResumoFinal:
         tk.Label(topo, text=f"{len(emitidas)} NFC-e emitida(s)  •  {brl(total)}  •  {duracao}",
                  fg="white", bg=cor, font=("Segoe UI", 12)).pack(anchor="w", padx=18, pady=(2, 14))
 
+        rod = tk.Frame(w, bg="white")          # rodapé primeiro: os botões nunca somem
+        rod.pack(side="bottom", fill="x", padx=18, pady=(0, 14))
+        tk.Button(rod, text="  OK  ", bg=cor, fg="white", relief="flat", font=("Segoe UI", 10, "bold"),
+                  command=w.destroy).pack(side="right")
+        if os.path.exists(ARQ_HIST):
+            ttk.Button(rod, text="Abrir histórico", command=lambda: os.startfile(ARQ_HIST)).pack(side="right", padx=8)
+
         corpo = tk.Frame(w, bg="white")
-        corpo.pack(fill="both", expand=True, padx=18, pady=12)
+        corpo.pack(fill="both", expand=True, padx=18, pady=10)
         linha = 0
 
         def secao(texto):
@@ -637,32 +646,25 @@ class ResumoFinal:
         item("Já tinham NFC-e", cont(fc.JA_FATURADA))
 
         secao("Não faturáveis no período (ficam de fora de propósito)")
-        item("Dinheiro", dinheiro)
-        item("Crediário", crediario)
-        item("Recebimentos de crediário", cont(fc.RECEBIMENTO))
-        item("Canceladas", cont(fc.CANCELADA))
-        item("Ainda abertas", cont(fc.ABERTA))
+        partes = [f"Dinheiro: {dinheiro}", f"Crediário: {crediario}", f"Recebimentos: {cont(fc.RECEBIMENTO)}",
+                  f"Canceladas: {cont(fc.CANCELADA)}", f"Abertas: {cont(fc.ABERTA)}"]
         if outras_nf:
-            item("Outras formas não configuradas", outras_nf)
+            partes.append(f"Outras formas: {outras_nf}")
+        tk.Label(corpo, text="   •   ".join(partes), bg="white", font=("Segoe UI", 10)).grid(
+            row=linha, column=0, columnspan=3, sticky="w", padx=(10, 0))
+        linha += 1
 
         if puladas:
             secao("Vendas puladas")
-            for v, motivo in puladas[:8]:
+            for v, motivo in puladas[:5]:
                 tk.Label(corpo, text=f"Nº {v['numero']}  •  {brl(v['valor'])}  •  {motivo}", bg="white",
                          font=("Segoe UI", 9), fg="#7A3E00").grid(row=linha, column=0, columnspan=3, sticky="w", padx=(10, 0))
                 linha += 1
-            if len(puladas) > 8:
-                tk.Label(corpo, text=f"... e mais {len(puladas) - 8} (veja o histórico)", bg="white",
+            if len(puladas) > 5:
+                tk.Label(corpo, text=f"... e mais {len(puladas) - 5} (veja o histórico)", bg="white",
                          font=("Segoe UI", 9)).grid(row=linha, column=0, columnspan=3, sticky="w", padx=(10, 0))
                 linha += 1
         corpo.grid_columnconfigure(0, weight=1)
-
-        rod = tk.Frame(w, bg="white")
-        rod.pack(fill="x", padx=18, pady=(0, 14))
-        tk.Button(rod, text="  OK  ", bg=cor, fg="white", relief="flat", font=("Segoe UI", 10, "bold"),
-                  command=w.destroy).pack(side="right")
-        if os.path.exists(ARQ_HIST):
-            ttk.Button(rod, text="Abrir histórico", command=lambda: os.startfile(ARQ_HIST)).pack(side="right", padx=8)
         w.lift()
         w.focus_force()
 
@@ -1049,7 +1051,8 @@ def demo_ui(pasta):
 
     def p4():
         foto("3_resumo.png")
-        r2 = dict(res, parado="Abri uma venda, mas o título não mostra 002.576. Nada foi emitido.")
+        r2 = dict(res, parado="Abri uma venda, mas o título não mostra 002.576. Nada foi emitido.",
+                  puladas=res["puladas"] * 7)
         ResumoFinal(app, r2)
         root.after(1500, p5)
 
