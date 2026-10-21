@@ -91,3 +91,13 @@ def reabrir(exe, args=()):
     descompactar seus próprios componentes em vez de usar a pasta da versão antiga."""
     subprocess.Popen([exe, *args], cwd=os.path.dirname(exe), env=ambiente_limpo(), close_fds=True,
                      creationflags=0x00000008 | 0x00000200)  # desvinculado, grupo de processos novo
+
+
+def limpar_antigos():
+    if not pode_se_atualizar():
+        return
+    for arq in glob.glob(os.path.join(os.path.dirname(sys.executable), "*.antigo.exe")):
+        try:
+            os.remove(arq)
+        except OSError:
+            pass
