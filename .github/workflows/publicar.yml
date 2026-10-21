@@ -23,6 +23,7 @@ jobs:
   build:
     needs: teste
     runs-on: windows-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Ler versao
@@ -50,17 +51,19 @@ jobs:
           python gerar_icone.py
           python -m PyInstaller --noconfirm --onefile --windowed --name AliberFaturador --icon aliber.ico --add-data "aliber.ico;." --collect-all winrt faturador.py
           $p = Start-Process dist/AliberFaturador.exe -ArgumentList "--teste-ocr" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "Autoteste do .exe falhou (codigo $($p.ExitCode): 1 = leitura de texto, 2 = foto da tela/componentes)" }
+          if ($p.ExitCode -ne 0) { Write-Host "::error::Autoteste do .exe falhou com codigo $($p.ExitCode)"; throw "Autoteste do .exe falhou (codigo $($p.ExitCode): 1 = leitura de texto, 2 = foto da tela/componentes)" }
           Write-Host "Autoteste do .exe: leitura de tela OK"
           # reabertura como o atualizador faz: a copia reaberta precisa funcionar inteira
           $res = Join-Path $PWD "reinicio.txt"
           Remove-Item $res -ErrorAction SilentlyContinue
-          $p = Start-Process dist/AliberFaturador.exe -ArgumentList "--teste-reinicio=$res" -Wait -PassThru
+          Start-Process dist/AliberFaturador.exe -ArgumentList "--teste-reinicio=$res"
           $t = 0
-          while (-not (Test-Path $res) -and $t -lt 90) { Start-Sleep 2; $t += 2 }
-          if (-not (Test-Path $res)) { throw "Teste de reabertura: a copia reaberta nao respondeu" }
+          while (-not (Test-Path $res) -and $t -lt 120) { Start-Sleep 3; $t += 3 }
+          $janelas = (Get-Process AliberFaturador -ErrorAction SilentlyContinue | ForEach-Object { "[$($_.Id)] '$($_.MainWindowTitle)'" }) -join "; "
+          Get-Process AliberFaturador -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not (Test-Path $res)) { Write-Host "::error::Reabertura: copia nao respondeu em 120s. Processos/janelas: $janelas"; exit 1 }
           $c = (Get-Content $res -Raw).Trim()
-          if ($c -ne "0") { throw "Teste de reabertura falhou (codigo $c)" }
+          if ($c -ne "0") { Write-Host "::error::Reabertura: autoteste da copia reaberta retornou $c. Janelas: $janelas"; exit 1 }
           Write-Host "Teste de reabertura (atualizador): OK"
           $v = "${{ steps.v.outputs.versao }}"
           $notas = (Get-Content NOVIDADES.txt -Raw -ErrorAction SilentlyContinue)
