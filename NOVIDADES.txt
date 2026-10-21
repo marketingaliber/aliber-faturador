@@ -1,2 +1,4 @@
-- Corrigido: números cortados na borda esquerda da lista (não precisa recalibrar)
-- Corrigido: a lista de vendas não aparecia na janela do Faturador
+- Sem calibração: o programa acha os botões do PDV+ lendo o texto da tela
+- Funciona mesmo mudando a resolução ou atualizando o PDV+
+- Novo botão "Verificar tela" mostra o que o programa enxerga
+- Quando algo não é encontrado, salva imagem e texto na pasta "diagnostico"

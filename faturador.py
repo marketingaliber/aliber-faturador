@@ -4,8 +4,8 @@ Aliber Faturador - emite NFC-e das vendas de cartão/Pix que ficaram sem nota no
 
 Como funciona:
   1. Lê o banco do PDV+ (somente leitura) e separa as vendas que devem ser faturadas.
-  2. Um macro opera a tela "Buscar negociações" do PDV+, filtrando UMA venda por vez
-     pelo minuto em que ela foi aberta, e clica em Emitir NFC-e.
+  2. Um macro opera a tela "Buscar negociações" do PDV+: acha cada botão lendo o texto da tela
+     (sem calibração), procura a venda pelo número, confere o título e clica em Emitir NFC-e.
   3. Depois de cada emissão, confere no banco se a nota foi para a venda certa.
      Qualquer coisa fora do esperado -> o macro para.
 
@@ -25,10 +25,11 @@ from tkinter import ttk, messagebox, filedialog
 
 import atualizador
 import faturador_core as fc
+import localizador as L
 import ocr
 
 APP_NOME = "Aliber Faturador"
-VERSAO = "2.1"
+VERSAO = "3.0"
 VERMELHO = "#D7262B"
 AZUL = "#1B4FA0"
 
@@ -37,29 +38,8 @@ if getattr(sys, "frozen", False):
 else:
     PASTA = os.path.dirname(os.path.abspath(__file__))
 ARQ_CONFIG = os.path.join(PASTA, "faturador_config.json")
-PASTA_CALIB = os.path.join(PASTA, "calibracao")
+PASTA_DIAG = os.path.join(PASTA, "diagnostico")
 ARQ_HIST = os.path.join(PASTA, "historico_faturamento.csv")
-ARQ_FALHA = os.path.join(PASTA, "calibracao", "ultima_busca_sem_sucesso.png")
-
-# Pontos que o macro clica. (chave, instrução, opcional, confere_imagem)
-PONTOS = [
-    ("filtrar", "Botão vermelho FILTRAR (painel Filtros de 'Buscar negociações')", False, True),
-    ("nota_nao_vinculada", "Clique em 'Nota não vinculada' para ela ficar AZUL. Depois: mouse em cima dela e F8", False, True),
-    ("p_hoje", "Botão de período HOJE", False, False),
-    ("p_7d", "Botão de período 7D", False, False),
-    ("p_1m", "Botão de período 1M", False, False),
-    ("p_3m", "Botão de período 3M", False, False),
-    ("p_6m", "Botão de período 6M", False, False),
-    ("p_1a", "Botão de período 1A", False, False),
-    ("abrir_filtros", "OPCIONAL: botão que reabre o painel Filtros, se ele fechar (F9 pula)", True, False),
-    ("lista_sup", "Clique em 3M e em Filtrar. Agora: canto SUPERIOR ESQUERDO da lista (logo abaixo do título 'Negociações')", False, False),
-    ("lista_inf", "Canto INFERIOR DIREITO da lista (acima da barra 'Total das negociações', antes do painel Filtros)", False, False),
-    ("emitir_nfce", "Abra uma venda da lista. Agora: 'Emitir NFC-e' no menu da direita", False, True),
-    ("voltar", "Seta de VOLTAR, no canto superior esquerdo (só F8, não clique)", False, False),
-    ("emitir_sem_cliente", "Clique em Emitir NFC-e. Agora: 'EMITIR SEM CLIENTE' (F9 se não apareceu)", True, True),
-    ("emitir", "Clique em Emitir sem cliente. Agora: botão 'EMITIR' da confirmação", False, True),
-    ("cancelar", "Botão 'CANCELAR' dessa mesma confirmação (depois clique nele de verdade)", False, False),
-]
 
 # Botão de período do PDV+ conforme a idade da venda (em dias). Limites com folga.
 PERIODOS = [(0, "p_hoje"), (5, "p_7d"), (27, "p_1m"), (88, "p_3m"), (178, "p_6m"), (360, "p_1a")]
@@ -67,13 +47,11 @@ PERIODOS = [(0, "p_hoje"), (5, "p_7d"), (27, "p_1m"), (88, "p_3m"), (178, "p_6m"
 CONFIG_PADRAO = {
     "db_path": fc.DB_PADRAO,
     "formas_faturar": fc.FORMAS_FATURAR_PADRAO,
-    "pontos": {},
     "espera_clique": 0.8,
     "espera_lista": 2.5,
     "espera_tela": 2.0,
     "espera_pos_emissao": 4.0,
     "tempo_limite_nota": 60,
-    "tolerancia_imagem": 28,
     "rolagem": 3,          # "cliques" da rodinha do mouse por passo ao procurar na lista
     "max_rolagens": 80,
 }
@@ -105,11 +83,32 @@ def registrar_historico(venda, resultado):
                     f"{venda['valor']:.2f}".replace(".", ","), venda["formas"], resultado])
 
 
+def salvar_diagnostico(nome, img, linhas, motivo):
+    """Guarda o que o programa viu quando algo não foi encontrado (para suporte)."""
+    try:
+        os.makedirs(PASTA_DIAG, exist_ok=True)
+        img.save(os.path.join(PASTA_DIAG, f"{nome}.png"))
+        with open(os.path.join(PASTA_DIAG, f"{nome}.txt"), "w", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%d/%m/%Y %H:%M:%S}\n{motivo}\n\nTexto lido:\n")
+            f.write("\n".join(t for t, _ in linhas))
+    except Exception:
+        pass
+
+
 # ----------------------------------------------------------------------------------
 # Tela / mouse / teclado (só Windows)
 # ----------------------------------------------------------------------------------
 class Parado(Exception):
     pass
+
+
+class Leitura:
+    """Uma foto da janela do PDV+ e o texto lido nela. (ox, oy) = onde a foto começa na tela."""
+    def __init__(self, img, linhas, ox, oy):
+        self.img, self.linhas, self.ox, self.oy = img, linhas, ox, oy
+
+    def na_tela(self, xy):
+        return (self.ox + xy[0], self.oy + xy[1])
 
 
 class Tela:
@@ -146,16 +145,23 @@ class Tela:
         time.sleep(0.6)
         return w
 
-    def origem(self):
+    def regiao_janela(self):
         w = self.janela()
-        return (w.left, w.top) if w else (0, 0)
+        if not w:
+            raise Parado("Janela do PDV+ não encontrada.")
+        sw, sh = self.pg.size()
+        x0, y0 = max(0, w.left), max(0, w.top)
+        x1, y1 = min(sw, w.left + w.width), min(sh, w.top + w.height)
+        return (x0, y0, x1 - x0, y1 - y0)
 
-    def ponto(self, chave):
-        p = self.cfg["pontos"].get(chave)
-        if not p:
-            return None
-        ox, oy = self.origem()
-        return ox + p["x"], oy + p["y"]
+    def ler(self, completo=True):
+        """Foto da janela inteira + leitura do texto. Tira o mouse de cima dos botões antes."""
+        self.checar_parada()
+        reg = self.regiao_janela()
+        self.pg.moveTo(reg[0] + reg[2] // 2, reg[1] + 8)
+        time.sleep(0.25)
+        img = self.pg.screenshot(region=reg)
+        return Leitura(img, ocr.ler(img, completo=completo), reg[0], reg[1])
 
     def checar_parada(self):
         if self.parar.is_set():
@@ -167,37 +173,10 @@ class Tela:
             self.checar_parada()
             time.sleep(0.1)
 
-    def clicar(self, chave):
+    def clicar(self, xy_tela):
         self.checar_parada()
-        xy = self.ponto(chave)
-        if not xy:
-            raise Parado(f"Ponto '{chave}' não calibrado.")
-        self.pg.click(*xy)
+        self.pg.click(*xy_tela)
         self.esperar(self.cfg["espera_clique"])
-
-    def digitar(self, texto, apagar=14):
-        """Limpa o campo sem depender do Ctrl+A (o PDV+ ignora): End + vários Backspace, depois digita."""
-        self.checar_parada()
-        self.pg.press("end")
-        time.sleep(0.1)
-        self.pg.press("backspace", presses=apagar, interval=0.03)
-        time.sleep(0.15)
-        digitar_unicode(texto)
-        time.sleep(0.3)
-
-    # leitura de tela
-    def regiao_lista(self):
-        """Da borda esquerda da janela até o canto direito calibrado, com folga acima do canto
-        superior: assim nenhum número fica cortado, mesmo se o canto foi marcado sobre o texto."""
-        a, b = self.ponto("lista_sup"), self.ponto("lista_inf")
-        ox, oy = self.origem()
-        x0 = max(0, ox) + 2
-        y0 = max(max(0, oy) + 2, a[1] - 40)
-        return (int(x0), int(y0), int(b[0] - x0), int(b[1] - y0))
-
-    def regiao_titulo(self):
-        x, y = self.ponto("voltar")
-        return (int(x + 20), int(max(0, y - 26)), 1100, 52)
 
     def captura(self, reg):
         return self.pg.screenshot(region=reg)
@@ -212,88 +191,54 @@ class Tela:
             ctypes.windll.user32.mouse_event(0x0800, 0, 0, 120 * passo, 0)
             time.sleep(0.02)
 
-    # conferência visual: compara um recorte da tela com o salvo na calibração
-    def recorte(self, chave):
-        xy = self.ponto(chave)
-        if not xy:
-            return None
-        return self.pg.screenshot(region=(xy[0] - 30, xy[1] - 12, 60, 24))
-
-    def confere(self, chave):
-        from PIL import Image, ImageChops, ImageStat
-        arq = os.path.join(PASTA_CALIB, f"{chave}.png")
-        if not os.path.exists(arq):
-            return True  # sem referência, não bloqueia
-        xy = self.ponto(chave)
-        self.pg.moveTo(*xy)
-        time.sleep(0.35)
-        atual = self.recorte(chave).convert("RGB")
-        ref = Image.open(arq).convert("RGB")
-        dif = ImageStat.Stat(ImageChops.difference(atual, ref)).mean
-        return sum(dif) / 3 <= self.cfg["tolerancia_imagem"]
-
-
-def digitar_unicode(texto):
-    """Digita caractere a caractere via SendInput Unicode (não depende do layout ABNT/US)."""
-    import ctypes
-    from ctypes import wintypes
-
-    INPUT_KEYBOARD, KEYEVENTF_UNICODE, KEYEVENTF_KEYUP = 1, 0x0004, 0x0002
-    ULONG_PTR = ctypes.c_size_t
-
-    class KEYBDINPUT(ctypes.Structure):
-        _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD), ("dwFlags", wintypes.DWORD),
-                    ("time", wintypes.DWORD), ("dwExtraInfo", ULONG_PTR)]
-
-    class MOUSEINPUT(ctypes.Structure):
-        _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG), ("mouseData", wintypes.DWORD),
-                    ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD), ("dwExtraInfo", ULONG_PTR)]
-
-    class _U(ctypes.Union):
-        _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT)]
-
-    class INPUT(ctypes.Structure):
-        _fields_ = [("type", wintypes.DWORD), ("u", _U)]
-
-    for ch in texto:
-        for flags in (KEYEVENTF_UNICODE, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP):
-            inp = INPUT(type=INPUT_KEYBOARD)
-            inp.u.ki = KEYBDINPUT(0, ord(ch), flags, 0, 0)
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
-        time.sleep(0.04)
-
 
 # ----------------------------------------------------------------------------------
-# O macro
+# O macro (sem calibração: cada botão é achado pelo texto, a cada passo)
 # ----------------------------------------------------------------------------------
+def exigir(achado, leitura, nome, msg):
+    if not achado:
+        salvar_diagnostico(nome, leitura.img, leitura.linhas, msg)
+        raise Parado(msg + f" (imagem salva em diagnostico\\{nome}.png)")
+    return achado
+
+
 def filtrar(tela, cfg, venda):
     """Período adequado à idade da venda + 'Nota não vinculada' + Filtrar."""
     dias = (date.today() - venda["criado"].date()).days
     chave = next((k for limite, k in PERIODOS if dias <= limite), None)
     if not chave:
         raise Parado(f"Venda {venda['numero']} é mais antiga que o maior período do PDV+ (1A).")
-    if not tela.confere("filtrar"):
-        if cfg["pontos"].get("abrir_filtros"):
-            tela.clicar("abrir_filtros")
-            tela.esperar(1.0)
-        if not tela.confere("filtrar"):
-            raise Parado("Não encontrei o painel Filtros de 'Buscar negociações' na tela.")
-    tela.clicar(chave)
-    if not tela.confere("nota_nao_vinculada"):
-        tela.clicar("nota_nao_vinculada")
-        tela.esperar(0.5)
-        if not tela.confere("nota_nao_vinculada"):
-            raise Parado("Não consegui deixar 'Nota não vinculada' selecionado.")
-    tela.clicar("filtrar")
+    lt = tela.ler()
+    if L.painel_filtros(lt.img, lt.linhas) is None:
+        exigir(None, lt, "sem_painel_filtros",
+               "Não encontrei o painel 'Filtros'. Deixe o PDV+ em Caixa > menu > Buscar negociações")
+    b = exigir(L.botao_periodo(lt.img, lt.linhas, chave), lt, "sem_periodo",
+               f"Não encontrei o botão de período {chave[2:].upper()} no painel Filtros")
+    tela.clicar(lt.na_tela(b.centro))
+
+    lt = tela.ler()
+    nota, marcado = L.nota_nao_vinculada(lt.img, lt.linhas)
+    exigir(nota, lt, "sem_nota_nao_vinculada", "Não encontrei o botão 'Nota não vinculada'")
+    if not marcado:
+        tela.clicar(lt.na_tela(nota.centro))
+        lt = tela.ler()
+        nota, marcado = L.nota_nao_vinculada(lt.img, lt.linhas)
+        if not marcado:
+            exigir(None, lt, "nota_nao_vinculada", "Não consegui deixar 'Nota não vinculada' selecionado")
+    f = exigir(L.botao_filtrar(lt.img, lt.linhas), lt, "sem_filtrar", "Não encontrei o botão Filtrar")
+    tela.clicar(lt.na_tela(f.centro))
     tela.esperar(cfg["espera_lista"])
 
 
 def localizar(tela, cfg, num, log):
     """Lê a lista, rolando se preciso, até achar o número. Retorna (x, y) na tela ou None."""
-    reg = tela.regiao_lista()
+    lt = tela.ler(completo=False)
+    x, y, w, h = L.regiao_lista(lt.img, lt.linhas)
+    reg = (lt.ox + x, lt.oy + y, w, h)
     tela.rolar(reg, 40)  # garante o topo da lista
     tela.esperar(0.6)
     anterior = None
+    img, linhas = lt.img, lt.linhas
     for i in range(int(cfg["max_rolagens"])):
         img = tela.captura(reg)
         linhas = ocr.ler(img)
@@ -306,14 +251,8 @@ def localizar(tela, cfg, num, log):
         anterior = atual
         tela.rolar(reg, -int(cfg["rolagem"]))
         tela.esperar(0.7)
-    try:
-        os.makedirs(os.path.dirname(ARQ_FALHA), exist_ok=True)
-        img.save(ARQ_FALHA)
-        with open(ARQ_FALHA.replace(".png", ".txt"), "w", encoding="utf-8") as f:
-            f.write(f"Procurando: {num}\n\n" + "\n".join(t for t, _ in linhas))
-    except Exception:
-        pass
-    log(f"   não achei {num} na lista ({i + 1} tela(s) lida(s)); imagem salva em calibracao/")
+    salvar_diagnostico("busca_sem_sucesso", img, linhas, f"Procurando a venda {num} na lista")
+    log(f"   não achei {num} na lista ({i + 1} tela(s) lida(s)); imagem salva em diagnostico\\")
     return None
 
 
@@ -331,47 +270,91 @@ def emitir_uma(tela, cfg, venda, teste, log):
     if not xy:
         return "pulada", "não encontrada na lista do PDV+"
     antes = fc.vendas_com_nota(db)
-    tela.pg.click(*xy)
+    tela.clicar(xy)
     tela.esperar(cfg["espera_tela"])
 
     # 2) confere o número no título ANTES de emitir
-    titulo = ocr.ler(tela.captura(tela.regiao_titulo()))
-    if ocr.achar_numero(titulo, venda["num"])[0] is None:
-        lido = " / ".join(t for t, _ in titulo) or "nada"
-        tela.clicar("voltar")
-        raise Parado(f"Abri uma venda, mas o título não mostra {venda['num']} (li: {lido}). Nada foi emitido.")
-    if not tela.confere("emitir_nfce"):
-        raise Parado(f"Venda {venda['numero']}: menu 'Emitir NFC-e' não encontrado. Nada foi emitido.")
-    tela.clicar("emitir_nfce")
-    tela.esperar(1.0)
+    lt = tela.ler()
+    seta = L.seta_voltar(lt.img, lt.linhas)
+    voltar = lt.na_tela(seta) if seta else None
+    if not L.numero_no_titulo(lt.img, lt.linhas, venda["num"]):
+        texto, _ = L.titulo_venda(lt.img, lt.linhas)
+        salvar_diagnostico("titulo_errado", lt.img, lt.linhas, f"Esperava a venda {venda['num']}")
+        if voltar:
+            tela.clicar(voltar)
+        raise Parado(f"Abri uma venda, mas o título não mostra {venda['num']} (li: {texto or 'nada'}). "
+                     "Nada foi emitido.")
+    exigir(voltar, lt, "sem_seta_voltar", "Não encontrei a seta de voltar na tela da venda. Nada foi emitido")
+    m = exigir(L.menu_emitir(lt.img, lt.linhas), lt, "sem_menu_emitir",
+               f"Venda {venda['numero']}: menu 'Emitir NFC-e' não encontrado. Nada foi emitido")
+    tela.clicar(lt.na_tela(m.centro))
+    tela.esperar(1.2)
 
-    # 3) diálogo de CPF/CNPJ (só aparece quando a venda não tem cliente com documento)
-    if cfg["pontos"].get("emitir_sem_cliente") and tela.confere("emitir_sem_cliente"):
+    # 3) diálogo de CPF/CNPJ (aparece quando a venda não tem cliente com documento)
+    lt = tela.ler()
+    sem_cliente = L.dialogo_cpf(lt.img, lt.linhas)
+    if sem_cliente:
         if venda["tem_doc"]:
             raise Parado(f"Venda {venda['numero']} tem CPF/CNPJ, mas o PDV+ pediu o documento. "
                          "Para não emitir sem o cliente, emita essa à mão e rode de novo.")
-        tela.clicar("emitir_sem_cliente")
-        tela.esperar(1.0)
+        tela.clicar(lt.na_tela(sem_cliente.centro))
+        tela.esperar(1.2)
+        lt = tela.ler()
 
     # 4) confirmação "Emitir NFC-e?"
-    if not tela.confere("emitir"):
-        raise Parado(f"Venda {venda['numero']}: a confirmação 'Emitir NFC-e?' não apareceu.")
+    emitir, cancelar = L.dialogo_confirmar(lt.img, lt.linhas)
+    exigir(emitir, lt, "sem_confirmacao", f"Venda {venda['numero']}: a confirmação 'Emitir NFC-e?' não apareceu")
     if teste:
-        tela.clicar("cancelar")
+        if cancelar:
+            tela.clicar(lt.na_tela(cancelar.centro))
+        else:
+            tela.pg.press("esc")
         tela.esperar(1.0)
-        tela.clicar("voltar")
+        tela.clicar(voltar)
         tela.esperar(cfg["espera_tela"])
         return "teste", "achou a venda, conferiu o título e cancelou na confirmação (nada emitido)"
 
-    tela.clicar("emitir")
+    tela.clicar(lt.na_tela(emitir.centro))
     log(f"{venda['numero']}: emitindo, aguardando a SEFAZ...")
     ok, msg = fc.aguardar_nota(db, venda["id_venda"], antes, cfg["tempo_limite_nota"])
     if not ok:
         raise Parado(f"Venda {venda['numero']}: {msg}")
     tela.esperar(cfg["espera_pos_emissao"])  # aviso de confirmação some sozinho
-    tela.clicar("voltar")
+    tela.clicar(voltar)
     tela.esperar(cfg["espera_tela"])
     return "emitida", msg
+
+
+def verificar_tela(cfg, fila):
+    """Botão 'Verificar tela': mostra o que o programa enxerga no PDV+ agora."""
+    try:
+        tela = Tela(cfg)
+        tela.ativar()
+        lt = tela.ler()
+    except Exception as e:
+        fila.put(("verificacao", f"Não consegui ler a tela do PDV+: {e}"))
+        return
+    img, ln = lt.img, lt.linhas
+    ok = lambda a: "OK" if a else "NÃO ACHEI"  # noqa: E731
+    linhas = []
+    if L.painel_filtros(img, ln) is not None:
+        linhas.append("Tela 'Buscar negociações' com painel Filtros: OK")
+        for k, nome in (("p_hoje", "Hoje"), ("p_7d", "7D"), ("p_1m", "1M"), ("p_3m", "3M"), ("p_6m", "6M"), ("p_1a", "1A")):
+            linhas.append(f"   botão {nome}: {ok(L.botao_periodo(img, ln, k))}")
+        nota, marcado = L.nota_nao_vinculada(img, ln)
+        linhas.append(f"   Nota não vinculada: {ok(nota)}" + (" (selecionado)" if marcado else ""))
+        linhas.append(f"   Filtrar: {ok(L.botao_filtrar(img, ln))}")
+        x, y, w, h = L.regiao_lista(img, ln)
+        linhas.append(f"   área da lista: {w}x{h} pixels")
+    elif L.titulo_venda(img, ln)[0]:
+        texto, _ = L.titulo_venda(img, ln)
+        linhas.append(f"Tela de venda: {texto}")
+        linhas.append(f"   seta voltar: {ok(L.seta_voltar(img, ln))}")
+        linhas.append(f"   menu Emitir NFC-e: {ok(L.menu_emitir(img, ln))}")
+    else:
+        linhas.append("Não reconheci a tela. Abra o PDV+ em Caixa > menu > Buscar negociações.")
+    salvar_diagnostico("verificacao", img, ln, "\n".join(linhas))
+    fila.put(("verificacao", "\n".join(linhas) + "\n\n(imagem salva em diagnostico\\verificacao.png)"))
 
 
 def rodar_macro(cfg, vendas, teste, fila):
@@ -415,7 +398,7 @@ def rodar_macro(cfg, vendas, teste, fila):
                          "CANCELOU na confirmação. Nenhuma nota foi emitida.")
         elif teste:
             msg_final = ("Teste: nenhuma venda pendente foi encontrada na tela do PDV+. Nada foi emitido. "
-                         "Veja a imagem calibracao/ultima_busca_sem_sucesso.png.")
+                         "Veja a imagem diagnostico\\busca_sem_sucesso.png.")
         else:
             msg_final = f"Concluído. {emitidas} NFC-e emitida(s), R$ {total_valor:.2f}. {puladas} pulada(s)."
     except Parado as e:
@@ -491,7 +474,7 @@ class App:
         tk.Button(rodape, text="  FATURAR PENDENTES  ", bg=VERMELHO, fg="white", font=("Segoe UI", 10, "bold"),
                   relief="flat", command=lambda: self.iniciar(False)).pack(side="right", padx=4)
         ttk.Button(rodape, text="Testar (sem emitir)", command=lambda: self.iniciar(True)).pack(side="right", padx=4)
-        ttk.Button(rodape, text="Calibrar cliques", command=self.calibrar).pack(side="right", padx=4)
+        ttk.Button(rodape, text="Verificar tela", command=self.verificar).pack(side="right", padx=4)
         ttk.Button(rodape, text="Configurações", command=self.configuracoes).pack(side="right", padx=4)
 
         self.txt_log = tk.Text(root, height=6, font=("Consolas", 9), state="disabled", bg="#f6f7f9")
@@ -499,8 +482,6 @@ class App:
 
         self.periodo(0, 0)
         self.root.after(200, self.verificar_fila)
-        if not all(k in self.cfg["pontos"] for k, _, opc, _ in PONTOS if not opc):
-            self.log("Calibração pendente: clique em 'Calibrar cliques' antes de faturar.")
         atualizador.limpar_antigos()
         self.root.after(1500, self.checar_atualizacao)
 
@@ -608,10 +589,6 @@ class App:
 
     # ---- macro ----
     def iniciar(self, teste):
-        faltando = [k for k, _, opc, _ in PONTOS if not opc and k not in self.cfg["pontos"]]
-        if faltando:
-            messagebox.showwarning(APP_NOME, "Calibre os cliques primeiro (botão 'Calibrar cliques').")
-            return
         self.atualizar()
         p = self.pendentes()
         if not p:
@@ -646,6 +623,11 @@ class App:
                 elif tipo == "reiniciar":
                     self.root.destroy()
                     return
+                elif tipo == "verificacao":
+                    self.root.deiconify()
+                    self.root.lift()
+                    self.log("Verificação da tela: " + m.split("\n")[0])
+                    messagebox.showinfo(APP_NOME, m)
                 elif tipo == "fim":
                     self.log(m.replace("\n", " "))
                     self.root.deiconify()
@@ -656,108 +638,16 @@ class App:
             pass
         self.root.after(200, self.verificar_fila)
 
-    # ---- calibração ----
-    def calibrar(self):
-        if not messagebox.askokcancel(APP_NOME,
-                "Calibração dos cliques\n\n"
-                "1. Abra o PDV+ (maximizado) em Caixa > menu > Buscar negociações, com o painel Filtros aberto.\n"
-                "2. Uma janelinha vai mostrar onde colocar o mouse. Posicione e aperte F8.\n"
-                "   (F9 pula os itens opcionais. ESC cancela.)\n"
-                "3. Entre um passo e outro, vá clicando no PDV+ normalmente para chegar na próxima tela.\n\n"
-                "IMPORTANTE: na confirmação 'Emitir NFC-e?' clique em CANCELAR, não emita."):
+    # ---- verificação da tela ----
+    def verificar(self):
+        if not messagebox.askokcancel(APP_NOME, "Vou trazer o PDV+ para a frente e ler a tela.\n\n"
+                                      "Deixe o PDV+ aberto em Caixa > menu > Buscar negociações."):
             return
-        Calibrador(self)
+        self.root.iconify()
+        threading.Thread(target=verificar_tela, args=(self.cfg, self.fila), daemon=True).start()
 
     def configuracoes(self):
         Configuracoes(self)
-
-
-class Calibrador:
-    def __init__(self, app):
-        import pyautogui
-        import pygetwindow  # noqa
-        from pynput import keyboard
-        self.app = app
-        self.pg = pyautogui
-        self.tela = Tela(app.cfg)
-        self.idx = 0
-        self.novos = {}
-        self.fila = queue.Queue()
-        os.makedirs(PASTA_CALIB, exist_ok=True)
-
-        self.win = tk.Toplevel(app.root)
-        self.win.overrideredirect(True)
-        self.win.attributes("-topmost", True)
-        sh = self.win.winfo_screenheight()
-        self.win.geometry(f"560x90+20+{sh - 170}")
-        self.win.configure(bg=AZUL)
-        self.lbl = tk.Label(self.win, text="", fg="white", bg=AZUL, wraplength=540,
-                            font=("Segoe UI", 11, "bold"), justify="left")
-        self.lbl.pack(fill="both", expand=True, padx=10, pady=8)
-        app.root.iconify()
-
-        def tecla(k):
-            if k in (keyboard.Key.f8, keyboard.Key.f9, keyboard.Key.esc):
-                self.fila.put(k)
-        self.keyboard = keyboard
-        self.ouvinte = keyboard.Listener(on_press=tecla)
-        self.ouvinte.start()
-        self.mostrar()
-        self.win.after(100, self.loop)
-
-    def mostrar(self):
-        chave, instr, opc, _ = PONTOS[self.idx]
-        self.lbl.config(text=f"Passo {self.idx + 1}/{len(PONTOS)}: {instr}\n"
-                             f"Mouse em cima e aperte F8{'  (F9 = pular)' if opc else ''}   •   ESC cancela")
-
-    def loop(self):
-        try:
-            k = self.fila.get_nowait()
-        except queue.Empty:
-            self.win.after(100, self.loop)
-            return
-        K = self.keyboard.Key
-        chave, _, opc, confere = PONTOS[self.idx]
-        if k == K.esc:
-            return self.fim(False)
-        if k == K.f9:
-            if not opc:
-                self.win.after(100, self.loop)
-                return
-            self.novos[chave] = None
-        else:
-            x, y = self.pg.position()
-            ox, oy = self.tela.origem()
-            self.novos[chave] = {"x": x - ox, "y": y - oy}
-            if confere:
-                self.win.withdraw()
-                self.win.update()
-                time.sleep(0.3)
-                self.pg.screenshot(region=(x - 30, y - 12, 60, 24)).save(os.path.join(PASTA_CALIB, f"{chave}.png"))
-                self.win.deiconify()
-        self.idx += 1
-        if self.idx >= len(PONTOS):
-            return self.fim(True)
-        self.mostrar()
-        self.win.after(100, self.loop)
-
-    def fim(self, ok):
-        self.ouvinte.stop()
-        self.win.destroy()
-        self.app.root.deiconify()
-        if ok:
-            pts = {k: v for k, v in self.novos.items() if v}
-            for k, v in self.novos.items():
-                if v is None:
-                    arq = os.path.join(PASTA_CALIB, f"{k}.png")
-                    if os.path.exists(arq):
-                        os.remove(arq)
-            self.app.cfg["pontos"] = pts
-            salvar_config(self.app.cfg)
-            self.app.log("Calibração salva.")
-            messagebox.showinfo(APP_NOME, "Calibração salva. Agora volte o PDV+ para 'Buscar negociações' e use 'Testar (sem emitir)'.")
-        else:
-            self.app.log("Calibração cancelada.")
 
 
 class Configuracoes:

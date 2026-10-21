@@ -63,11 +63,25 @@ async def _ler_async(img):
     return linhas
 
 
-def ler(img):
-    """Retorna [(texto_da_linha, [(palavra, (x, y, largura, altura)), ...]), ...] em pixels da imagem."""
+def tratar(img):
+    """Deixa todo texto preto sobre branco, seja ele escuro sobre claro ou branco sobre botão colorido."""
+    from PIL import ImageChops, ImageFilter
+    g = img.convert("L")
+    fundo = g.filter(ImageFilter.MedianFilter(21))
+    return ImageChops.difference(g, fundo).point(lambda v: 0 if v > 45 else 255).convert("RGB")
+
+
+def ler(img, completo=False):
+    """
+    Retorna [(texto_da_linha, [(palavra, (x, y, largura, altura)), ...]), ...] em pixels da imagem.
+    completo=True faz uma segunda leitura da imagem tratada (para botões coloridos) e junta as duas.
+    """
     from PIL import Image
     grande = img.convert("RGB").resize((img.width * ESCALA, img.height * ESCALA), Image.LANCZOS)
-    return asyncio.run(_ler_async(grande))
+    linhas = asyncio.run(_ler_async(grande))
+    if completo:
+        linhas += asyncio.run(_ler_async(tratar(grande)))
+    return linhas
 
 
 # ---------------------------------------------------------------------------------------------

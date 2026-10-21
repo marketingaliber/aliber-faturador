@@ -19,6 +19,7 @@ jobs:
         run: |
           python -m pip install -r requirements.txt
           python testes/teste_ocr.py
+          python testes/teste_localizador.py
   build:
     needs: teste
     runs-on: windows-latest

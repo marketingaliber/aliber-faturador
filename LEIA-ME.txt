@@ -1,4 +1,4 @@
-ALIBER FATURADOR 2.0
+ALIBER FATURADOR 3.0
 Emite NFC-e, depois da venda, das vendas de cartão e Pix que ficaram sem nota no PDV+.
 
 O QUE ELE FATURA
@@ -10,15 +10,11 @@ O QUE ELE NÃO FATURA
 As formas de pagamento podem ser mudadas em Configurações.
 
 PRIMEIRA VEZ NO COMPUTADOR DO CLIENTE
-  1. Abra o programa (1_INSTALAR_E_ABRIR.bat ou AliberFaturador.exe).
-  2. No PDV+, maximizado: Caixa > menu (três linhas) > Buscar negociações. Deixe o painel Filtros aberto
-     e escolha um período que mostre ao menos uma venda (ex.: 3M).
-  3. No Faturador, clique em "Calibrar cliques" e siga a janelinha azul no canto da tela:
-     mouse em cima do item pedido + F8. Quando a janelinha pedir, clique de verdade no PDV+
-     para chegar à próxima tela (filtrar, abrir uma venda, Emitir NFC-e...). F9 pula os opcionais.
-     Na confirmação "Emitir NFC-e?" clique em CANCELAR.
-  4. Volte o PDV+ para "Buscar negociações" e clique em "Testar (sem emitir)".
-     O macro filtra, procura a venda pelo NÚMERO lendo a tela (rolando a lista se precisar),
+  Não tem calibração. O programa acha os botões do PDV+ lendo o texto da tela.
+  1. Abra o AliberFaturador.exe.
+  2. No PDV+: Caixa > menu (três linhas) > Buscar negociações, com o painel Filtros aberto.
+  3. No Faturador, clique em "Verificar tela": ele mostra quais botões encontrou.
+  4. Clique em "Testar (sem emitir)": o macro filtra, procura a venda pelo NÚMERO,
      abre, confere o número no título e CANCELA na confirmação.
 
 USO NORMAL
@@ -28,18 +24,17 @@ USO NORMAL
     conferida no banco. Qualquer diferença: o macro PARA.
   - Histórico de tudo que foi emitido: historico_faturamento.csv (abre no Excel).
 
-SE ALGO DER ERRADO NO TESTE
-  - "Não achei a venda na lista": a imagem do que o programa viu fica em
-    calibracao\ultima_busca_sem_sucesso.png. Confira se os cantos da lista foram calibrados certo.
+SE ALGO DER ERRADO
+  - Toda vez que algo não é encontrado, o programa salva o que viu na pasta "diagnostico"
+    (imagem .png + texto .txt). Mande esses arquivos para o suporte.
   - O computador é lento: aumente os tempos em Configurações.
-  - Mudou a resolução da tela ou atualizou o PDV+: refaça a calibração.
 
 SEGURANÇA
   - O programa só LÊ o banco do PDV+, nunca grava nele. Quem emite a nota é o próprio PDV+.
 
 ATUALIZAÇÃO
   - Ao abrir, o programa procura versão nova sozinho e pergunta se quer atualizar.
-    Ele baixa, troca o .exe e reabre. Calibração, configurações e histórico são mantidos.
+    Ele baixa, troca o .exe e reabre. Configurações e histórico são mantidos.
   - Também dá para procurar manualmente em Configurações > Procurar atualização.
 
 ÍCONE
