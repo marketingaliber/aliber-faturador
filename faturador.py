@@ -29,7 +29,7 @@ import localizador as L
 import ocr
 
 APP_NOME = "Aliber Faturador"
-VERSAO = "3.0"
+VERSAO = "3.1"
 VERMELHO = "#D7262B"
 AZUL = "#1B4FA0"
 
@@ -203,37 +203,56 @@ def exigir(achado, leitura, nome, msg):
 
 
 def filtrar(tela, cfg, venda):
-    """Período adequado à idade da venda + 'Nota não vinculada' + Filtrar."""
+    """Período adequado à idade da venda + 'Nota não vinculada' + Filtrar. Retorna x0 do painel."""
     dias = (date.today() - venda["criado"].date()).days
     chave = next((k for limite, k in PERIODOS if dias <= limite), None)
     if not chave:
         raise Parado(f"Venda {venda['numero']} é mais antiga que o maior período do PDV+ (1A).")
     lt = tela.ler()
-    if L.painel_filtros(lt.img, lt.linhas) is None:
+    x0 = L.painel_filtros(lt.img, lt.linhas)
+    if x0 is None:  # talvez o painel esteja rolado para baixo: tenta subir antes de desistir
+        tela.rolar((lt.ox + int(lt.img.width * 0.9), lt.oy + int(lt.img.height * 0.4), 10, 10), 15)
+        tela.esperar(0.5)
+        lt = tela.ler()
+        x0 = L.painel_filtros(lt.img, lt.linhas)
+    if x0 is None:
         exigir(None, lt, "sem_painel_filtros",
                "Não encontrei o painel 'Filtros'. Deixe o PDV+ em Caixa > menu > Buscar negociações")
+    # ponto para rolar o painel (o painel pode ser maior que a tela em monitores pequenos)
+    painel = (lt.ox + int(x0) + 40, lt.oy + int(lt.img.height * 0.45), 10, 10)
+    tela.rolar(painel, 15)  # topo do painel: botões de período visíveis
+    tela.esperar(0.5)
+    lt = tela.ler()
     b = exigir(L.botao_periodo(lt.img, lt.linhas, chave), lt, "sem_periodo",
                f"Não encontrei o botão de período {chave[2:].upper()} no painel Filtros")
     tela.clicar(lt.na_tela(b.centro))
 
-    lt = tela.ler()
-    nota, marcado = L.nota_nao_vinculada(lt.img, lt.linhas)
-    exigir(nota, lt, "sem_nota_nao_vinculada", "Não encontrei o botão 'Nota não vinculada'")
+    # 'Nota não vinculada' pode estar abaixo da parte visível do painel: rola até aparecer
+    nota = marcado = None
+    for _ in range(5):
+        lt = tela.ler()
+        nota, marcado = L.nota_nao_vinculada(lt.img, lt.linhas, x0)
+        if nota:
+            break
+        tela.rolar(painel, -4)
+        tela.esperar(0.5)
+    exigir(nota, lt, "sem_nota_nao_vinculada", "Não encontrei o botão 'Nota não vinculada' (nem rolando o painel)")
     if not marcado:
         tela.clicar(lt.na_tela(nota.centro))
         lt = tela.ler()
-        nota, marcado = L.nota_nao_vinculada(lt.img, lt.linhas)
+        nota, marcado = L.nota_nao_vinculada(lt.img, lt.linhas, x0)
         if not marcado:
             exigir(None, lt, "nota_nao_vinculada", "Não consegui deixar 'Nota não vinculada' selecionado")
-    f = exigir(L.botao_filtrar(lt.img, lt.linhas), lt, "sem_filtrar", "Não encontrei o botão Filtrar")
+    f = exigir(L.botao_filtrar(lt.img, lt.linhas, x0), lt, "sem_filtrar", "Não encontrei o botão Filtrar")
     tela.clicar(lt.na_tela(f.centro))
     tela.esperar(cfg["espera_lista"])
+    return x0
 
 
-def localizar(tela, cfg, num, log):
+def localizar(tela, cfg, num, log, x0=None):
     """Lê a lista, rolando se preciso, até achar o número. Retorna (x, y) na tela ou None."""
     lt = tela.ler(completo=False)
-    x, y, w, h = L.regiao_lista(lt.img, lt.linhas)
+    x, y, w, h = L.regiao_lista(lt.img, lt.linhas, x0)
     reg = (lt.ox + x, lt.oy + y, w, h)
     tela.rolar(reg, 40)  # garante o topo da lista
     tela.esperar(0.6)
@@ -263,10 +282,10 @@ def emitir_uma(tela, cfg, venda, teste, log):
         return "pulada", motivo
 
     tela.ativar()
-    filtrar(tela, cfg, venda)
+    x0 = filtrar(tela, cfg, venda)
 
     # 1) acha a venda na lista pelo número e abre
-    xy = localizar(tela, cfg, venda["num"], log)
+    xy = localizar(tela, cfg, venda["num"], log, x0)
     if not xy:
         return "pulada", "não encontrada na lista do PDV+"
     antes = fc.vendas_com_nota(db)

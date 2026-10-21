@@ -66,6 +66,23 @@ a, sel = L.nota_nao_vinculada(img, ln)
 checa(perto(a, 1719, 798) and not sel, f"Nota não vinculada {a}, selecionado={sel} (esperado False)")
 checa(perto(L.botao_filtrar(img, ln), 1767, 1002), f"Filtrar -> {L.botao_filtrar(img, ln)}")
 
+# --- tela menor (1366x768), botão 1M selecionado, painel cortado antes de 'Situação'
+img, ln = abrir("filtros_1366.png")
+x0 = L.painel_filtros(img, ln)
+checa(x0 is not None and 1040 < x0 < 1080, f"[1366] painel Filtros começa em x={x0}")
+cx = L.botoes_periodo(img, ln)
+checa(len(cx) == 6, f"[1366] 6 botões de período pelo desenho ({len(cx)} achados)")
+for chave, (x, y) in {"p_hoje": (1108, 127), "p_7d": (1172, 127), "p_1m": (1230, 127), "p_3m": (1289, 127),
+                      "p_6m": (1104, 167), "p_1a": (1161, 167)}.items():
+    a = L.botao_periodo(img, ln, chave)
+    checa(perto(a, x, y, 15), f"[1366] {chave} -> {a}")
+checa(perto(L.botao_filtrar(img, ln), 1214, 682, 40), f"[1366] Filtrar -> {L.botao_filtrar(img, ln)}")
+checa(L.nota_nao_vinculada(img, ln)[0] is None, "[1366] 'Nota não vinculada' fora da tela (precisa rolar o painel)")
+
+# --- a 1920 também pelo desenho
+img, ln = abrir("filtros.png")
+checa(len(L.botoes_periodo(img, ln)) == 6, "[1920] 6 botões de período pelo desenho")
+
 # --- lista com 'Nota não vinculada' selecionado
 img, ln = abrir("lista.png")
 a, sel = L.nota_nao_vinculada(img, ln)

@@ -1,4 +1,3 @@
-- Sem calibração: o programa acha os botões do PDV+ lendo o texto da tela
-- Funciona mesmo mudando a resolução ou atualizando o PDV+
-- Novo botão "Verificar tela" mostra o que o programa enxerga
-- Quando algo não é encontrado, salva imagem e texto na pasta "diagnostico"
+- Corrigido: botões de período não reconhecidos (agora são achados pelo desenho, não pelo texto)
+- Telas pequenas: o painel Filtros é rolado até aparecer 'Nota não vinculada'
+- Leitura mais ampliada em telas menores

@@ -78,6 +78,9 @@ def procurar(linhas, frase, prefixo=False, filtro=None):
                 if not junto:
                     continue
                 if parecido(junto, alvo, prefixo):
+                    resto = "".join(norm(w) for w, _ in palavras[i + 1:j + 1])
+                    if j > i and resto and parecido(resto, alvo, prefixo):
+                        break  # a 1ª palavra é sobra (ex.: borda do botão lida como letra); pega a próxima
                     a = _uniao(palavras[i:j + 1])
                     if filtro is None or filtro(a):
                         achados.append(a)
@@ -110,7 +113,86 @@ PERIODOS = {
 }
 
 
+ORDEM_PERIODOS = ["p_hoje", "p_7d", "p_1m", "p_3m", "p_6m", "p_1a"]
+
+
+def botoes_periodo(img, linhas):
+    """
+    Acha os 6 botões de período pelo DESENHO (caixinhas cinza ou azul entre 'Período' e 'Inicial'),
+    sem depender de ler o texto deles. Retorna {chave: Achado} na ordem Hoje, 7D, 1M, 3M, 6M, 1A,
+    ou {} se não encontrar exatamente 6 caixinhas.
+    """
+    x0 = painel_filtros(img, linhas)
+    if x0 is None:
+        return {}
+    H = img.height
+    dentro = lambda a: a.x > x0  # noqa: E731
+    per = _primeiro(procurar(linhas, "Período", filtro=dentro))
+    ini = _primeiro(procurar(linhas, "Inicial", filtro=dentro))
+    tit = _primeiro(procurar(linhas, "Filtros", filtro=dentro))
+    topo = per.y + per.h + 4 if per else (tit.y + tit.h + 30 if tit else None)
+    if topo is None:
+        return {}
+    base = ini.y - 4 if (ini and ini.y > topo) else topo + H * 0.16
+    x_ini, y_ini = int(x0 + 5), int(topo)
+    x_fim, y_fim = int(img.width - 3), int(min(H, base))
+    if y_fim - y_ini < 15:
+        return {}
+    rgb = img.convert("RGB")
+    P = 2  # passo da grade (mais rápido)
+    cols = range(x_ini, x_fim, P)
+    rows = range(y_ini, y_fim, P)
+    marca = {}
+    for y in rows:
+        for x in cols:
+            r, g, b = rgb.getpixel((x, y))
+            if min(r, g, b) < 248:
+                marca[(x, y)] = True
+    vistos, caixas = set(), []
+    for ponto in marca:
+        if ponto in vistos:
+            continue
+        pilha, comp = [ponto], []
+        vistos.add(ponto)
+        while pilha:
+            x, y = pilha.pop()
+            comp.append((x, y))
+            for vx, vy in ((x + P, y), (x - P, y), (x, y + P), (x, y - P)):
+                if (vx, vy) in marca and (vx, vy) not in vistos:
+                    vistos.add((vx, vy))
+                    pilha.append((vx, vy))
+        xs = [c[0] for c in comp]
+        ys = [c[1] for c in comp]
+        w, h = max(xs) - min(xs), max(ys) - min(ys)
+        if 25 <= w <= 220 and 16 <= h <= 70 and len(comp) > 0.5 * (w / P) * (h / P):
+            caixas.append(Achado(min(xs), min(ys), w, h, "botão de período"))
+    if len(caixas) != 6:
+        return {}
+    # ordem de leitura: linha por linha (tolerância de meia altura), da esquerda para a direita
+    caixas.sort(key=lambda c: c.y)
+    linhas_cx, atual = [], [caixas[0]]
+    for c in caixas[1:]:
+        if abs(c.y - atual[0].y) <= atual[0].h / 2:
+            atual.append(c)
+        else:
+            linhas_cx.append(atual)
+            atual = [c]
+    linhas_cx.append(atual)
+    ordenadas = [c for ln in linhas_cx for c in sorted(ln, key=lambda c: c.x)]
+    for k, c in zip(ORDEM_PERIODOS, ordenadas):
+        c.texto = k
+    return dict(zip(ORDEM_PERIODOS, ordenadas))
+
+
 def botao_periodo(img, linhas, chave):
+    """Primeiro pelo desenho (mais confiável); se não der, pelo texto lido."""
+    pelo_desenho = botoes_periodo(img, linhas)
+    if pelo_desenho:
+        return pelo_desenho[chave]
+    return _botao_periodo_texto(img, linhas, chave)
+
+
+def _botao_periodo_texto(img, linhas, chave):
     x0 = painel_filtros(img, linhas)
     if x0 is None:
         return None
@@ -140,9 +222,9 @@ def botao_periodo(img, linhas, chave):
     return Achado(cx - 15, cy - m6.h / 2, 30, m6.h, f"{chave} (calculado)")
 
 
-def nota_nao_vinculada(img, linhas):
-    """Retorna (Achado, selecionado: bool) ou (None, False)."""
-    x0 = painel_filtros(img, linhas)
+def nota_nao_vinculada(img, linhas, x0=None):
+    """Retorna (Achado, selecionado: bool) ou (None, False). x0 = início do painel, se já conhecido."""
+    x0 = x0 if x0 is not None else painel_filtros(img, linhas)
     if x0 is None:
         return None, False
     a = _primeiro(procurar(linhas, "Nota não vinculada", filtro=lambda a: a.x > x0))
@@ -155,20 +237,25 @@ def _fundo_azul(img, a):
     """O botão selecionado tem fundo azul. Mede pixels logo à esquerda e à direita do texto."""
     rgb = img.convert("RGB")
     cy = int(a.y + a.h / 2)
-    azuis = total = 0
-    for dx in (-10, -7, -4):
-        for x in (int(a.x) + dx, int(a.x + a.w) - dx):
+
+    def lado(xs):
+        azuis = total = 0
+        for x in xs:
             for dy in (-3, 0, 3):
                 if 0 <= x < rgb.width and 0 <= cy + dy < rgb.height:
                     r, g, b = rgb.getpixel((x, cy + dy))
                     total += 1
                     if b > 110 and b > r + 50 and b > g + 20:
                         azuis += 1
-    return total > 0 and azuis / total > 0.5
+        return total > 0 and azuis / total > 0.6
+
+    esq = [int(a.x) - d for d in (4, 7, 10)]
+    dir_ = [int(a.x + a.w) + d for d in (4, 7, 10)]
+    return lado(esq) or lado(dir_)
 
 
-def botao_filtrar(img, linhas):
-    x0 = painel_filtros(img, linhas)
+def botao_filtrar(img, linhas, x0=None):
+    x0 = x0 if x0 is not None else painel_filtros(img, linhas)
     if x0 is None:
         return None
     achados = procurar(linhas, "Filtrar", filtro=lambda a: a.x > x0)
@@ -188,11 +275,11 @@ def botao_filtrar(img, linhas):
     return None
 
 
-def regiao_lista(img, linhas):
+def regiao_lista(img, linhas, x0=None):
     """(x, y, largura, altura) da área das vendas: abaixo do título 'Negociações',
     acima da barra 'Total das negociações filtradas' e à esquerda do painel Filtros."""
     W, H = img.width, img.height
-    x0 = painel_filtros(img, linhas)
+    x0 = x0 if x0 is not None else painel_filtros(img, linhas)
     direita = (x0 - 10) if x0 else int(W * 0.83)
     topo = 70
     t = _primeiro(procurar(linhas, "Negociações", filtro=lambda a: a.y < H * 0.12 and a.x < W * 0.3))

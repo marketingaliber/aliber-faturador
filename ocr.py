@@ -48,7 +48,7 @@ def _bitmap(img):
     return SoftwareBitmap.create_copy_from_buffer(buf, BitmapPixelFormat.BGRA8, rgba.width, rgba.height)
 
 
-async def _ler_async(img):
+async def _ler_async(img, escala=ESCALA):
     global _engine
     if _engine is None:
         _engine = _criar_engine()
@@ -58,7 +58,7 @@ async def _ler_async(img):
         palavras = []
         for w in ln.words:
             r = w.bounding_rect
-            palavras.append((w.text, (r.x / ESCALA, r.y / ESCALA, r.width / ESCALA, r.height / ESCALA)))
+            palavras.append((w.text, (r.x / escala, r.y / escala, r.width / escala, r.height / escala)))
         linhas.append((ln.text, palavras))
     return linhas
 
@@ -77,10 +77,11 @@ def ler(img, completo=False):
     completo=True faz uma segunda leitura da imagem tratada (para botões coloridos) e junta as duas.
     """
     from PIL import Image
-    grande = img.convert("RGB").resize((img.width * ESCALA, img.height * ESCALA), Image.LANCZOS)
-    linhas = asyncio.run(_ler_async(grande))
+    escala = 3 if img.width <= 1600 else ESCALA  # telas menores: letras menores, amplia mais
+    grande = img.convert("RGB").resize((img.width * escala, img.height * escala), Image.LANCZOS)
+    linhas = asyncio.run(_ler_async(grande, escala))
     if completo:
-        linhas += asyncio.run(_ler_async(tratar(grande)))
+        linhas += asyncio.run(_ler_async(tratar(grande), escala))
     return linhas
 
 
