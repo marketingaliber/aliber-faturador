@@ -29,7 +29,7 @@ import localizador as L
 import ocr
 
 APP_NOME = "Aliber Faturador"
-VERSAO = "3.2"
+VERSAO = "3.3"
 VERMELHO = "#D7262B"
 AZUL = "#1B4FA0"
 
@@ -545,7 +545,7 @@ class App:
             self.log(f"Versão {info['versao']} disponível (atualização automática só funciona no .exe).")
             return
         if not messagebox.askyesno(APP_NOME, f"Nova versão disponível: {info['versao']} (você está na {VERSAO}).\n\n"
-                                   f"{notas}\n\nAtualizar agora? O programa fecha e abre sozinho."):
+                                   f"{notas}\n\nAtualizar agora? O programa fecha e abre sozinho em alguns segundos."):
             return
         self.log(f"Baixando versão {info['versao']}...")
 
@@ -769,7 +769,7 @@ def autoteste_ocr():
         import pygetwindow  # noqa: F401
         from pynput import keyboard  # noqa: F401
     except Exception:
-        sys.exit(2)
+        _resultado_autoteste(2)
     img = Image.new("RGB", (700, 120), (240, 240, 244))
     try:
         fonte = ImageFont.truetype("arial.ttf", 28)
@@ -780,10 +780,22 @@ def autoteste_ocr():
         ok = ocr.achar_numero(ocr.ler(img), "006.39")[0] is not None
     except Exception:
         ok = False
-    sys.exit(0 if ok else 1)
+    _resultado_autoteste(0 if ok else 1)
+
+
+def _resultado_autoteste(codigo):
+    for a in sys.argv:
+        if a.startswith("--resultado="):
+            with open(a.split("=", 1)[1], "w") as f:
+                f.write(str(codigo))
+    sys.exit(codigo)
 
 
 def main():
+    for a in sys.argv:
+        if a.startswith("--teste-reinicio="):  # usado na publicação: reabre como o atualizador faz
+            atualizador.reabrir(sys.executable, ["--teste-ocr", "--resultado=" + a.split("=", 1)[1]])
+            sys.exit(0)
     if "--teste-ocr" in sys.argv:
         autoteste_ocr()
     ativar_escala_windows()

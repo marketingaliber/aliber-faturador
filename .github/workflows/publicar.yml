@@ -52,6 +52,16 @@ jobs:
           $p = Start-Process dist/AliberFaturador.exe -ArgumentList "--teste-ocr" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Autoteste do .exe falhou (codigo $($p.ExitCode): 1 = leitura de texto, 2 = foto da tela/componentes)" }
           Write-Host "Autoteste do .exe: leitura de tela OK"
+          # reabertura como o atualizador faz: a copia reaberta precisa funcionar inteira
+          $res = Join-Path $PWD "reinicio.txt"
+          Remove-Item $res -ErrorAction SilentlyContinue
+          $p = Start-Process dist/AliberFaturador.exe -ArgumentList "--teste-reinicio=$res" -Wait -PassThru
+          $t = 0
+          while (-not (Test-Path $res) -and $t -lt 90) { Start-Sleep 2; $t += 2 }
+          if (-not (Test-Path $res)) { throw "Teste de reabertura: a copia reaberta nao respondeu" }
+          $c = (Get-Content $res -Raw).Trim()
+          if ($c -ne "0") { throw "Teste de reabertura falhou (codigo $c)" }
+          Write-Host "Teste de reabertura (atualizador): OK"
           $v = "${{ steps.v.outputs.versao }}"
           $notas = (Get-Content NOVIDADES.txt -Raw -ErrorAction SilentlyContinue)
           $url = "https://github.com/${{ github.repository }}/releases/download/v$v/AliberFaturador.exe"

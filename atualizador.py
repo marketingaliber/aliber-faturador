@@ -73,7 +73,26 @@ def instalar(info, progresso=None):
         os.remove(antigo)
     os.replace(exe, antigo)
     os.replace(novo, exe)
-    subprocess.Popen([exe], cwd=os.path.dirname(exe), close_fds=True)
+    reabrir(exe)
+
+
+def ambiente_limpo():
+    """Variáveis de ambiente SEM as marcas do .exe atual. Se a versão nova herdar essas marcas,
+    ela tenta usar a pasta temporária da versão antiga (que é apagada ao fechar) e quebra com
+    erros como 'cannot import name _imaging' ou 'unable to import pyscreeze'."""
+    env = {k: v for k, v in os.environ.items()
+           if not (k.startswith("_PYI") or k.startswith("_MEIPASS") or k == "TCL_LIBRARY" or k == "TK_LIBRARY")}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
+def reabrir(exe, args=()):
+    """Abre a versão nova só depois que esta fechar, como um programa independente."""
+    pasta = os.path.dirname(exe)
+    extra = "".join(f' "{a}"' for a in args)
+    comando = f'ping -n 3 127.0.0.1 >nul & start "" "{exe}"{extra}'
+    subprocess.Popen(["cmd", "/c", comando], cwd=pasta, env=ambiente_limpo(), close_fds=True,
+                     creationflags=0x08000000 | 0x00000008)  # sem janela, desvinculado
 
 
 def limpar_antigos():

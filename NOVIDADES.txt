@@ -1,2 +1,2 @@
-- Corrigido: erro 'unable to import pyscreeze' ao tirar foto da tela
-- Compatível com escala de tela do Windows (125%, 150%)
+- Corrigido: depois de atualizar, a versão nova podia abrir quebrada (erros _imaging / pyscreeze)
+- IMPORTANTE: depois DESTA atualização, feche e abra o Faturador mais uma vez. Das próximas em diante não precisa.
