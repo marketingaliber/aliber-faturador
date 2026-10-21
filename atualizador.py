@@ -87,19 +87,7 @@ def ambiente_limpo():
 
 
 def reabrir(exe, args=()):
-    """Abre a versão nova só depois que esta fechar, como um programa independente."""
-    pasta = os.path.dirname(exe)
-    extra = "".join(f' "{a}"' for a in args)
-    comando = f'ping -n 3 127.0.0.1 >nul & start "" "{exe}"{extra}'
-    subprocess.Popen(["cmd", "/c", comando], cwd=pasta, env=ambiente_limpo(), close_fds=True,
-                     creationflags=0x08000000 | 0x00000008)  # sem janela, desvinculado
-
-
-def limpar_antigos():
-    if not pode_se_atualizar():
-        return
-    for arq in glob.glob(os.path.join(os.path.dirname(sys.executable), "*.antigo.exe")):
-        try:
-            os.remove(arq)
-        except OSError:
-            pass
+    """Abre a versão nova como um programa independente e com ambiente limpo, para ela
+    descompactar seus próprios componentes em vez de usar a pasta da versão antiga."""
+    subprocess.Popen([exe, *args], cwd=os.path.dirname(exe), env=ambiente_limpo(), close_fds=True,
+                     creationflags=0x00000008 | 0x00000200)  # desvinculado, grupo de processos novo
