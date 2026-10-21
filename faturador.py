@@ -29,7 +29,7 @@ import localizador as L
 import ocr
 
 APP_NOME = "Aliber Faturador"
-VERSAO = "3.3"
+VERSAO = "3.4"
 VERMELHO = "#D7262B"
 AZUL = "#1B4FA0"
 
@@ -400,10 +400,14 @@ def rodar_macro(cfg, vendas, teste, fila):
     def log(m):
         fila.put(("log", m))
 
+    res = {"teste": teste, "emitidas": [], "puladas": [], "parado": None, "msg_final": "",
+           "inicio": datetime.now(), "fim": None, "total": len(vendas)}
     try:
         tela = Tela(cfg)
     except Exception as e:  # noqa
-        fila.put(("fim", f"Não foi possível iniciar o macro: {e}"))
+        res["parado"] = res["msg_final"] = f"Não foi possível iniciar o macro: {e}"
+        res["fim"] = datetime.now()
+        fila.put(("fim", res))
         return
 
     from pynput import keyboard
@@ -414,47 +418,255 @@ def rodar_macro(cfg, vendas, teste, fila):
     ouvinte = keyboard.Listener(on_press=tecla)
     ouvinte.start()
 
-    emitidas = puladas = 0
-    total_valor = 0.0
-    msg_final = ""
     st = None
     try:
         for i, v in enumerate(vendas, 1):
+            fila.put(("progresso", f"Venda {i} de {len(vendas)}  •  Nº {v['numero']}  •  R$ {v['valor']:.2f}"))
             log(f"[{i}/{len(vendas)}] {v['numero']}  R$ {v['valor']:.2f}  {v['formas']}")
             st, msg = emitir_uma(tela, cfg, v, teste, log)
             log(f"   -> {st}: {msg}")
             if not teste:
                 registrar_historico(v, f"{st}: {msg}")
             if st == "emitida":
-                emitidas += 1
-                total_valor += v["valor"]
+                res["emitidas"].append(v)
             elif st == "pulada":
-                puladas += 1
+                res["puladas"].append((v, msg))
             if teste and st == "teste":
                 break
         if teste and st == "teste":
-            msg_final = (f"Teste concluído com a venda {v['numero']}: achou na lista, conferiu o número e "
-                         "CANCELOU na confirmação. Nenhuma nota foi emitida.")
+            res["msg_final"] = (f"Teste concluído com a venda {v['numero']}: achou na lista, conferiu o número e "
+                                "CANCELOU na confirmação. Nenhuma nota foi emitida.")
         elif teste:
-            msg_final = ("Teste: nenhuma venda pendente foi encontrada na tela do PDV+. Nada foi emitido. "
-                         "Veja a imagem diagnostico\\busca_sem_sucesso.png.")
+            res["msg_final"] = ("Teste: nenhuma venda pendente foi encontrada na tela do PDV+. Nada foi emitido. "
+                                "Veja a imagem diagnostico\\busca_sem_sucesso.png.")
         else:
-            msg_final = f"Concluído. {emitidas} NFC-e emitida(s), R$ {total_valor:.2f}. {puladas} pulada(s)."
+            res["msg_final"] = (f"Concluído. {len(res['emitidas'])} NFC-e emitida(s), "
+                                f"{len(res['puladas'])} pulada(s).")
     except Parado as e:
-        msg_final = f"MACRO PARADO: {e}\n\nEmitidas antes da parada: {emitidas}."
+        res["parado"] = str(e)
+        res["msg_final"] = f"MACRO PARADO: {e}\n\nEmitidas antes da parada: {len(res['emitidas'])}."
         if not teste:
             registrar_historico({"numero": "-", "criado": datetime.now(), "valor": 0, "formas": ""},
                                 f"PARADO: {e}")
     except Exception as e:  # pyautogui.FailSafeException e outros
-        msg_final = f"MACRO PARADO: {type(e).__name__}: {e}\n\nEmitidas antes da parada: {emitidas}."
+        res["parado"] = f"{type(e).__name__}: {e}"
+        res["msg_final"] = f"MACRO PARADO: {res['parado']}\n\nEmitidas antes da parada: {len(res['emitidas'])}."
     finally:
         ouvinte.stop()
-    fila.put(("fim", msg_final))
+    res["fim"] = datetime.now()
+    fila.put(("fim", res))
 
 
 # ----------------------------------------------------------------------------------
 # Interface
 # ----------------------------------------------------------------------------------
+def brl(v):
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def janela_pdv_retangulo():
+    """(esquerda, topo, direita, base) da janela do PDV+, ou None."""
+    try:
+        import pygetwindow
+        for w in pygetwindow.getAllWindows():
+            if (w.title or "").strip().startswith("PDV+") and w.width > 300:
+                return (w.left, w.top, w.left + w.width, w.top + w.height)
+    except Exception:
+        pass
+    return None
+
+
+class AvisoExecucao:
+    """Faixa vermelha 'NÃO MEXA NO MOUSE' enquanto o macro roda.
+    Fica na borda da tela (fora da janela do PDV+ quando há espaço), deixa os cliques
+    passarem através dela e pede ao Windows para não aparecer nas fotos de tela."""
+    TEXTO = "⚠  ATENÇÃO! NÃO MEXA NO MOUSE! AGUARDE A MENSAGEM DE FINALIZAÇÃO DO FATURADOR!"
+
+    def __init__(self, root, capturavel=False):
+        self.win = tk.Toplevel(root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+        ret = janela_pdv_retangulo()
+        base_pdv = min(sh, ret[3]) if ret else sh
+        if sh - base_pdv >= 28:            # espaço abaixo do PDV+ (barra de tarefas): fica ali
+            y, h = base_pdv, min(48, sh - base_pdv)
+        else:                              # sem espaço: faixa fina no topo (sobre a barra de título)
+            y, h = max(0, ret[1]) if ret else 0, 30
+        self.win.geometry(f"{sw}x{h}+0+{y}")
+        self.cor = VERMELHO
+        self.frame = tk.Frame(self.win, bg=self.cor)
+        self.frame.pack(fill="both", expand=True)
+        tam = 13 if sw >= 1600 else 11
+        self.lbl = tk.Label(self.frame, text=self.TEXTO, fg="white", bg=self.cor,
+                            font=("Segoe UI", tam, "bold"))
+        self.lbl.pack(side="left", padx=14)
+        self.prog = tk.Label(self.frame, text="Preparando...   (ESC para parar)", fg="white", bg=self.cor,
+                             font=("Segoe UI", tam - 2))
+        self.prog.pack(side="right", padx=14)
+        self.win.update_idletasks()
+        self._estilo_windows(capturavel)
+        self._piscar()
+
+    def _hwnd(self):
+        import ctypes
+        return ctypes.windll.user32.GetParent(self.win.winfo_id()) or self.win.winfo_id()
+
+    def excluir_da_captura(self):
+        try:
+            import ctypes
+            ctypes.windll.user32.SetWindowDisplayAffinity(self._hwnd(), 0x11)
+        except Exception:
+            pass
+
+    def _estilo_windows(self, capturavel=False):
+        try:
+            import ctypes
+            self.win.attributes("-alpha", 0.95)
+            u = ctypes.windll.user32
+            hwnd = u.GetParent(self.win.winfo_id()) or self.win.winfo_id()
+            GWL_EXSTYLE = -20
+            ex = u.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            # camada + cliques atravessam + não aparece na barra de tarefas + não rouba o foco
+            u.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | 0x80000 | 0x20 | 0x80 | 0x08000000)
+        except Exception:
+            pass
+        if not capturavel:
+            self.excluir_da_captura()  # fora das fotos de tela (Windows 10 2004+)
+
+    def _piscar(self):
+        if not self.win.winfo_exists():
+            return
+        self.cor = "#A3161B" if self.cor == VERMELHO else VERMELHO
+        for w in (self.frame, self.lbl, self.prog):
+            w.configure(bg=self.cor)
+        self.win.after(700, self._piscar)
+
+    def progresso(self, texto):
+        if self.win.winfo_exists():
+            self.prog.configure(text=texto + "   (ESC para parar)")
+
+    def fechar(self):
+        if self.win.winfo_exists():
+            self.win.destroy()
+
+
+class ResumoFinal:
+    """Janela de resultado ao fim do faturamento (verde; laranja se foi interrompido)."""
+    VERDE = "#1E8E3E"
+    LARANJA = "#E37400"
+
+    def __init__(self, app, res):
+        self.app = app
+        emitidas, puladas = res["emitidas"], res["puladas"]
+        total = sum(v["valor"] for v in emitidas)
+
+        # por forma de pagamento
+        por_forma = {}
+        for v in emitidas:
+            cods = v.get("codigos") or []
+            nome = "Misto (mais de uma forma)" if len(cods) > 1 else fc.FORMAS.get(cods[0], "Outra") if cods else "Outra"
+            q, s = por_forma.get(nome, (0, 0.0))
+            por_forma[nome] = (q + 1, s + v["valor"])
+
+        # situação do período depois da execução
+        app.atualizar()
+        vs = app.vendas
+        faltam = [v for v in vs if v["status"] == fc.FATURAR]
+        manuais = [v for v in vs if v["status"] == fc.MANUAL]
+        cont = lambda st: sum(1 for v in vs if v["status"] == st)  # noqa: E731
+        dinheiro = sum(1 for v in vs if v["status"] == fc.NAO_FATURAR and v["motivo"] == "dinheiro")
+        crediario = sum(1 for v in vs if v["status"] == fc.NAO_FATURAR and v["motivo"] == "crediário")
+        outras_nf = cont(fc.NAO_FATURAR) - dinheiro - crediario
+        seg = int((res["fim"] - res["inicio"]).total_seconds())
+        duracao = f"{seg // 60} min {seg % 60:02d} s" if seg >= 60 else f"{seg} s"
+
+        cor = self.LARANJA if res["parado"] else self.VERDE
+        w = self.win = tk.Toplevel(app.root)
+        w.title(f"{APP_NOME} - resultado")
+        w.configure(bg="white")
+        w.transient(app.root)
+        w.attributes("-topmost", True)
+        w.geometry("680x600")
+        w.minsize(560, 480)
+
+        topo = tk.Frame(w, bg=cor)
+        topo.pack(fill="x")
+        titulo = "FATURAMENTO INTERROMPIDO" if res["parado"] else "FATURAMENTO CONCLUÍDO"
+        tk.Label(topo, text=("⚠ " if res["parado"] else "✔ ") + titulo, fg="white", bg=cor,
+                 font=("Segoe UI", 18, "bold")).pack(anchor="w", padx=18, pady=(14, 0))
+        tk.Label(topo, text=f"{len(emitidas)} NFC-e emitida(s)  •  {brl(total)}  •  {duracao}",
+                 fg="white", bg=cor, font=("Segoe UI", 12)).pack(anchor="w", padx=18, pady=(2, 14))
+
+        corpo = tk.Frame(w, bg="white")
+        corpo.pack(fill="both", expand=True, padx=18, pady=12)
+        linha = 0
+
+        def secao(texto):
+            nonlocal linha
+            tk.Label(corpo, text=texto, bg="white", fg=AZUL, font=("Segoe UI", 11, "bold")).grid(
+                row=linha, column=0, columnspan=3, sticky="w", pady=(10 if linha else 0, 2))
+            linha += 1
+
+        def item(rotulo, qtd, valor=None, cor_qtd="#222"):
+            nonlocal linha
+            tk.Label(corpo, text=rotulo, bg="white", font=("Segoe UI", 10)).grid(row=linha, column=0, sticky="w", padx=(10, 0))
+            tk.Label(corpo, text=str(qtd), bg="white", fg=cor_qtd, font=("Segoe UI", 10, "bold")).grid(row=linha, column=1, sticky="e", padx=12)
+            tk.Label(corpo, text=brl(valor) if valor is not None else "", bg="white", font=("Segoe UI", 10)).grid(row=linha, column=2, sticky="e")
+            linha += 1
+
+        if res["parado"]:
+            tk.Label(corpo, text=f"Motivo: {res['parado']}", bg="#FFF4E5", fg="#7A3E00", wraplength=620,
+                     justify="left", font=("Segoe UI", 10)).grid(row=linha, column=0, columnspan=3, sticky="we", pady=(0, 6))
+            linha += 1
+
+        secao("Emitidas agora, por forma de pagamento")
+        if por_forma:
+            for nome, (q, s) in sorted(por_forma.items(), key=lambda x: -x[1][0]):
+                item(nome, q, s)
+        else:
+            item("Nenhuma", 0)
+        item("Total emitido", len(emitidas), total, self.VERDE)
+
+        secao("Situação do período depois do faturamento")
+        item("Ainda faltam faturar (cartão/Pix sem nota)", len(faltam), sum(v["valor"] for v in faltam),
+             self.LARANJA if faltam else self.VERDE)
+        item("Puladas nesta execução", len(puladas), sum(v["valor"] for v, _ in puladas),
+             self.LARANJA if puladas else "#222")
+        item("Para emitir à mão (mais de 1 ano)", len(manuais), sum(v["valor"] for v in manuais))
+        item("Já tinham NFC-e", cont(fc.JA_FATURADA))
+
+        secao("Não faturáveis no período (ficam de fora de propósito)")
+        item("Dinheiro", dinheiro)
+        item("Crediário", crediario)
+        item("Recebimentos de crediário", cont(fc.RECEBIMENTO))
+        item("Canceladas", cont(fc.CANCELADA))
+        item("Ainda abertas", cont(fc.ABERTA))
+        if outras_nf:
+            item("Outras formas não configuradas", outras_nf)
+
+        if puladas:
+            secao("Vendas puladas")
+            for v, motivo in puladas[:8]:
+                tk.Label(corpo, text=f"Nº {v['numero']}  •  {brl(v['valor'])}  •  {motivo}", bg="white",
+                         font=("Segoe UI", 9), fg="#7A3E00").grid(row=linha, column=0, columnspan=3, sticky="w", padx=(10, 0))
+                linha += 1
+            if len(puladas) > 8:
+                tk.Label(corpo, text=f"... e mais {len(puladas) - 8} (veja o histórico)", bg="white",
+                         font=("Segoe UI", 9)).grid(row=linha, column=0, columnspan=3, sticky="w", padx=(10, 0))
+                linha += 1
+        corpo.grid_columnconfigure(0, weight=1)
+
+        rod = tk.Frame(w, bg="white")
+        rod.pack(fill="x", padx=18, pady=(0, 14))
+        tk.Button(rod, text="  OK  ", bg=cor, fg="white", relief="flat", font=("Segoe UI", 10, "bold"),
+                  command=w.destroy).pack(side="right")
+        if os.path.exists(ARQ_HIST):
+            ttk.Button(rod, text="Abrir histórico", command=lambda: os.startfile(ARQ_HIST)).pack(side="right", padx=8)
+        w.lift()
+        w.focus_force()
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -648,6 +860,7 @@ class App:
         if not messagebox.askokcancel(APP_NOME, texto):
             return
         self.log(("TESTE: " if teste else "") + f"iniciando com {len(p)} venda(s)")
+        self.aviso = AvisoExecucao(self.root)
         self.root.iconify()
         threading.Thread(target=rodar_macro, args=(self.cfg, p, teste, self.fila), daemon=True).start()
 
@@ -667,12 +880,21 @@ class App:
                     self.root.lift()
                     self.log("Verificação da tela: " + m.split("\n")[0])
                     messagebox.showinfo(APP_NOME, m)
+                elif tipo == "progresso":
+                    if getattr(self, "aviso", None):
+                        self.aviso.progresso(m)
                 elif tipo == "fim":
-                    self.log(m.replace("\n", " "))
+                    if getattr(self, "aviso", None):
+                        self.aviso.fechar()
+                        self.aviso = None
+                    self.log(m["msg_final"].replace("\n", " "))
                     self.root.deiconify()
                     self.root.lift()
-                    self.atualizar()
-                    (messagebox.showwarning if "PARADO" in m else messagebox.showinfo)(APP_NOME, m)
+                    if m["teste"]:
+                        self.atualizar()
+                        (messagebox.showwarning if m["parado"] else messagebox.showinfo)(APP_NOME, m["msg_final"])
+                    else:
+                        ResumoFinal(self, m)
         except queue.Empty:
             pass
         self.root.after(200, self.verificar_fila)
@@ -791,8 +1013,60 @@ def _resultado_autoteste(codigo):
     sys.exit(codigo)
 
 
+def demo_ui(pasta):
+    """Usado no GitHub: mostra a faixa e o resumo com dados de exemplo e fotografa a tela."""
+    from PIL import ImageGrab
+    os.makedirs(pasta, exist_ok=True)
+    root = tk.Tk()
+    app = App(root)
+    agora = datetime.now()
+    ex = lambda n, val, cods: {"numero": n, "num": n.split(" ")[0], "valor": val, "codigos": cods,  # noqa: E731
+                               "formas": fc.nome_formas(cods), "criado": agora}
+    res = {"teste": False, "parado": None, "msg_final": "", "inicio": agora - timedelta(seconds=263), "fim": agora,
+           "emitidas": [ex("002.582 (mesa 1)", 21.0, [4]), ex("003.562", 6.0, [1]), ex("002.578", 24.0, [1]),
+                        ex("002.577", 22.0, [3]), ex("002.575", 16.0, [3]), ex("006.98 (mesa 1)", 68.3, [1, 4])],
+           "puladas": [(ex("002.576", 15.0, [4]), "não encontrada na lista do PDV+")], "total": 7}
+    passos = []
+
+    def foto(nome):
+        ImageGrab.grab(all_screens=True).save(os.path.join(pasta, nome))
+
+    def p1():
+        passos.append(AvisoExecucao(root, capturavel=True))
+        passos[0].progresso("Venda 3 de 10  •  Nº 002.578 (mesa 1)  •  R$ 24.00")
+        root.after(1500, p2)
+
+    def p2():
+        foto("1_aviso.png")
+        passos[0].excluir_da_captura()
+        root.after(800, p3)
+
+    def p3():
+        foto("2_aviso_fora_da_captura.png")
+        passos[0].fechar()
+        ResumoFinal(app, res)
+        root.after(1500, p4)
+
+    def p4():
+        foto("3_resumo.png")
+        r2 = dict(res, parado="Abri uma venda, mas o título não mostra 002.576. Nada foi emitido.")
+        ResumoFinal(app, r2)
+        root.after(1500, p5)
+
+    def p5():
+        foto("4_resumo_interrompido.png")
+        root.destroy()
+
+    root.after(1500, p1)
+    root.mainloop()
+    sys.exit(0)
+
+
 def main():
     for a in sys.argv:
+        if a.startswith("--demo-ui="):
+            ativar_escala_windows()
+            demo_ui(a.split("=", 1)[1])
         if a.startswith("--teste-reinicio="):  # usado na publicação: reabre como o atualizador faz
             atualizador.reabrir(sys.executable, ["--teste-ocr", "--resultado=" + a.split("=", 1)[1]])
             sys.exit(0)

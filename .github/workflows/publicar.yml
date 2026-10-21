@@ -78,6 +78,23 @@ jobs:
           $notas = (Get-Content NOVIDADES.txt -Raw -ErrorAction SilentlyContinue)
           $url = "https://github.com/${{ github.repository }}/releases/download/v$v/AliberFaturador.exe"
           @{ versao = $v; url = $url; notas = "$notas".Trim() } | ConvertTo-Json | Set-Content -Encoding utf8 dist/versao.json
+      - name: Fotografar a interface (so em ramos de teste)
+        if: steps.v.outputs.existe == '0' && github.ref != 'refs/heads/main'
+        shell: pwsh
+        run: |
+          $cap = Join-Path $PWD "capturas"
+          $p = Start-Process dist/AliberFaturador.exe -ArgumentList "--demo-ui=$cap" -PassThru
+          $t = 0
+          while (-not (Test-Path "$cap/4_resumo_interrompido.png") -and $t -lt 120) { Start-Sleep 3; $t += 3 }
+          Start-Sleep 2
+          Get-Process AliberFaturador -ErrorAction SilentlyContinue | Stop-Process -Force
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout --orphan capturas-ui
+          git rm -rf --cached . | Out-Null
+          git add capturas
+          git commit -m "Capturas da interface ($env:GITHUB_SHA)"
+          git push -f origin capturas-ui
       - uses: softprops/action-gh-release@v2
         if: steps.v.outputs.existe == '0' && github.ref == 'refs/heads/main'
         with:

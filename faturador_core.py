@@ -133,6 +133,7 @@ def triagem(db_path, data_ini, data_fim, formas_faturar=None):
                 "criado": criado,
                 "valor": round(v["valor_total"] or 0, 2),
                 "formas": nome_formas(codigos) if codigos else "-",
+                "codigos": codigos,
                 "cliente": v["nome_cliente"] or "",
                 "tem_doc": bool(v["doc"]),
                 "status": st,
