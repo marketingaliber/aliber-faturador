@@ -1,3 +1,2 @@
-- Corrigido: botões de período não reconhecidos (agora são achados pelo desenho, não pelo texto)
-- Telas pequenas: o painel Filtros é rolado até aparecer 'Nota não vinculada'
-- Leitura mais ampliada em telas menores
+- Corrigido: erro 'unable to import pyscreeze' ao tirar foto da tela
+- Compatível com escala de tela do Windows (125%, 150%)

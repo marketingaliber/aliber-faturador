@@ -29,7 +29,7 @@ import localizador as L
 import ocr
 
 APP_NOME = "Aliber Faturador"
-VERSAO = "3.1"
+VERSAO = "3.2"
 VERMELHO = "#D7262B"
 AZUL = "#1B4FA0"
 
@@ -102,6 +102,26 @@ class Parado(Exception):
     pass
 
 
+def ativar_escala_windows():
+    """Faz o Windows informar posições reais da tela mesmo com escala de 125%/150%.
+    Sem isso, a foto e o clique podem ficar em escalas diferentes."""
+    try:
+        import ctypes
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+def foto_tela(reg):
+    """Foto de um pedaço da tela (x, y, largura, altura), direto pelo Pillow."""
+    from PIL import ImageGrab
+    x, y, w, h = (int(v) for v in reg)
+    return ImageGrab.grab(bbox=(x, y, x + w, y + h), all_screens=True).convert("RGB")
+
+
 class Leitura:
     """Uma foto da janela do PDV+ e o texto lido nela. (ox, oy) = onde a foto começa na tela."""
     def __init__(self, img, linhas, ox, oy):
@@ -160,7 +180,7 @@ class Tela:
         reg = self.regiao_janela()
         self.pg.moveTo(reg[0] + reg[2] // 2, reg[1] + 8)
         time.sleep(0.25)
-        img = self.pg.screenshot(region=reg)
+        img = foto_tela(reg)
         return Leitura(img, ocr.ler(img, completo=completo), reg[0], reg[1])
 
     def checar_parada(self):
@@ -179,7 +199,7 @@ class Tela:
         self.esperar(self.cfg["espera_clique"])
 
     def captura(self, reg):
-        return self.pg.screenshot(region=reg)
+        return foto_tela(reg)
 
     def rolar(self, reg, cliques):
         """Rodinha do mouse sobre a lista. cliques > 0 sobe, < 0 desce."""
@@ -738,8 +758,18 @@ def recurso(nome):
 
 
 def autoteste_ocr():
-    """Usado na publicação: o .exe lê um texto desenhado e sai com 0 (ok) ou 1 (falha)."""
+    """Usado na publicação: o .exe tira uma foto da tela e lê um texto desenhado.
+    Sai com 0 (ok), 1 (leitura falhou) ou 2 (foto da tela falhou)."""
     from PIL import Image, ImageDraw, ImageFont
+    ativar_escala_windows()
+    try:
+        foto = foto_tela((0, 0, 200, 100))
+        assert foto.size == (200, 100)
+        import pyautogui  # noqa: F401  (mouse/teclado precisam carregar)
+        import pygetwindow  # noqa: F401
+        from pynput import keyboard  # noqa: F401
+    except Exception:
+        sys.exit(2)
     img = Image.new("RGB", (700, 120), (240, 240, 244))
     try:
         fonte = ImageFont.truetype("arial.ttf", 28)
@@ -756,6 +786,7 @@ def autoteste_ocr():
 def main():
     if "--teste-ocr" in sys.argv:
         autoteste_ocr()
+    ativar_escala_windows()
     root = tk.Tk()
     try:
         root.iconbitmap(default=recurso("aliber.ico"))
