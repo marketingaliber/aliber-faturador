@@ -65,6 +65,15 @@ jobs:
           $c = (Get-Content $res -Raw).Trim()
           if ($c -ne "0") { Write-Host "::error::Reabertura: autoteste da copia reaberta retornou $c. Janelas: $janelas"; exit 1 }
           Write-Host "Teste de reabertura (atualizador): OK"
+          # abertura normal: a janela precisa abrir e continuar aberta
+          $g = Start-Process dist/AliberFaturador.exe -PassThru
+          Start-Sleep 15
+          $g.Refresh()
+          $titulo = $g.MainWindowTitle
+          $vivo = -not $g.HasExited
+          Get-Process AliberFaturador -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not $vivo -or $titulo -notlike "Aliber Faturador*") { Write-Host "::error::Abertura normal falhou (aberto=$vivo, janela='$titulo')"; exit 1 }
+          Write-Host "Abertura normal: OK ($titulo)"
           $v = "${{ steps.v.outputs.versao }}"
           $notas = (Get-Content NOVIDADES.txt -Raw -ErrorAction SilentlyContinue)
           $url = "https://github.com/${{ github.repository }}/releases/download/v$v/AliberFaturador.exe"
